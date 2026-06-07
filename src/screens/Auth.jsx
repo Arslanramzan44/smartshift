@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { ArrowRight, ArrowLeft, Eye, EyeOff, Mail, Lock, Home, Truck, Package, Check } from 'lucide-react'
 import { Button, Field, Logo, Card, Stagger, Item } from '../components/ui'
 import { TopBar } from '../components/nav'
+import { setRole } from '../lib/auth'
 
 /* ===================== Onboarding ===================== */
 const slides = [
@@ -161,6 +162,10 @@ export function RoleSelect() {
   const [sel, setSel] = useState('customer')
   const nav = useNavigate()
   const target = roles.find((r) => r.id === sel).to
+  const go = () => {
+    setRole(sel)
+    nav(target)
+  }
   return (
     <div className="flex min-h-screen flex-col px-5 pb-8 pt-14">
       <div className="text-center">
@@ -201,7 +206,7 @@ export function RoleSelect() {
           )
         })}
       </div>
-      <Button onClick={() => nav(target)}>Continue</Button>
+      <Button onClick={go}>Continue</Button>
     </div>
   )
 }

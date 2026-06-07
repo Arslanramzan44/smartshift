@@ -131,5 +131,22 @@ export const moverNotifications = [
   },
 ]
 
+export const customerNotifications = [
+  {
+    group: 'Today',
+    items: [
+      { icon: 'truck', tone: 'brand', title: 'Mover On The Way', accent: true, text: 'Ahmed Khan is en route to your pickup for Move #SM-8492.', cta: 'Track Move' },
+      { icon: 'cash', tone: 'green', title: 'Payment Confirmed', text: 'Your payment of PKR 4,500 for Move #SM-8492 was successful.', when: '2 hours ago' },
+    ],
+  },
+  {
+    group: 'Yesterday',
+    items: [
+      { icon: 'verified', tone: 'brand', title: 'Booking Confirmed', text: 'Your move on Oct 24 has been confirmed. A mover will be assigned soon.', when: 'Yesterday, 4:30 PM' },
+      { icon: 'star', tone: 'amber', title: 'Rate Your Move', text: 'How was your last move? Leave a review for Ahmed Khan.', when: 'Yesterday, 10:15 AM' },
+    ],
+  },
+]
+
 export const ratingTags = ['Punctual', 'Professional', 'Careful with Items', 'Great Communication']
 export const tipOptions = [200, 500, 1000]

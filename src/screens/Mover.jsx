@@ -37,6 +37,7 @@ import {
   documents,
   moverNotifications,
 } from '../lib/data'
+import { clearRole } from '../lib/auth'
 
 /* ===================== Mover Dashboard ===================== */
 export function MoverDashboard() {
@@ -433,7 +434,7 @@ export function MoverProfile() {
                 <ChevronRight className="h-4 w-4 text-slate-300" />
               </Link>
             ))}
-            <button onClick={() => nav('/')} className="flex w-full items-center gap-3 p-4 text-rose-500">
+            <button onClick={() => { clearRole(); nav('/') }} className="flex w-full items-center gap-3 p-4 text-rose-500">
               <span className="grid h-9 w-9 place-items-center rounded-xl bg-rose-50">
                 <LogOut className="h-4 w-4" />
               </span>

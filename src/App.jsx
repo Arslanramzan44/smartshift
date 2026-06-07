@@ -9,7 +9,9 @@ import {
   CustomerRating,
   CustomerMoves,
   CustomerProfile,
+  CustomerAlerts,
 } from './screens/Customer'
+import { getRole } from './lib/auth'
 import { BookWizard } from './screens/Book'
 import { SettingsScreen } from './screens/Settings'
 import {
@@ -61,6 +63,15 @@ function Page({ children }) {
   )
 }
 
+// Gate role-specific screens. Wrong/no role redirects so a customer
+// never lands on mover data and vice-versa.
+function RoleGuard({ role, children }) {
+  const current = getRole()
+  if (!current) return <Navigate to="/role" replace />
+  if (current !== role) return <Navigate to={current === 'mover' ? '/mover' : '/customer'} replace />
+  return children
+}
+
 function AnimatedRoutes() {
   const location = useLocation()
   return (
@@ -71,24 +82,24 @@ function AnimatedRoutes() {
         <Route path="/role" element={<Page><RoleSelect /></Page>} />
         <Route path="/login" element={<Page><Login /></Page>} />
 
-        <Route path="/customer" element={<Page><CustomerDashboard /></Page>} />
-        <Route path="/customer/book" element={<Page><BookWizard /></Page>} />
-        <Route path="/customer/moves" element={<Page><CustomerMoves /></Page>} />
-        <Route path="/customer/track" element={<Page><CustomerTrack /></Page>} />
-        <Route path="/customer/rating" element={<Page><CustomerRating /></Page>} />
-        <Route path="/customer/profile" element={<Page><CustomerProfile /></Page>} />
+        <Route path="/customer" element={<RoleGuard role="customer"><Page><CustomerDashboard /></Page></RoleGuard>} />
+        <Route path="/customer/book" element={<RoleGuard role="customer"><Page><BookWizard /></Page></RoleGuard>} />
+        <Route path="/customer/moves" element={<RoleGuard role="customer"><Page><CustomerMoves /></Page></RoleGuard>} />
+        <Route path="/customer/track" element={<RoleGuard role="customer"><Page><CustomerTrack /></Page></RoleGuard>} />
+        <Route path="/customer/rating" element={<RoleGuard role="customer"><Page><CustomerRating /></Page></RoleGuard>} />
+        <Route path="/customer/profile" element={<RoleGuard role="customer"><Page><CustomerProfile /></Page></RoleGuard>} />
         <Route path="/settings" element={<Page><SettingsScreen /></Page>} />
-        <Route path="/customer/alerts" element={<Page><MoverNotifications /></Page>} />
+        <Route path="/customer/alerts" element={<RoleGuard role="customer"><Page><CustomerAlerts /></Page></RoleGuard>} />
 
-        <Route path="/mover" element={<Page><MoverDashboard /></Page>} />
-        <Route path="/mover/available" element={<Page><MoverAvailable /></Page>} />
-        <Route path="/mover/jobs" element={<Page><MoverJobDetail /></Page>} />
-        <Route path="/mover/job/:id" element={<Page><MoverJobDetail /></Page>} />
-        <Route path="/mover/scan" element={<Page><MoverScan /></Page>} />
-        <Route path="/mover/profile" element={<Page><MoverProfile /></Page>} />
-        <Route path="/mover/earnings" element={<Page><MoverEarnings /></Page>} />
-        <Route path="/mover/documents" element={<Page><MoverDocuments /></Page>} />
-        <Route path="/mover/notifications" element={<Page><MoverNotifications /></Page>} />
+        <Route path="/mover" element={<RoleGuard role="mover"><Page><MoverDashboard /></Page></RoleGuard>} />
+        <Route path="/mover/available" element={<RoleGuard role="mover"><Page><MoverAvailable /></Page></RoleGuard>} />
+        <Route path="/mover/jobs" element={<RoleGuard role="mover"><Page><MoverJobDetail /></Page></RoleGuard>} />
+        <Route path="/mover/job/:id" element={<RoleGuard role="mover"><Page><MoverJobDetail /></Page></RoleGuard>} />
+        <Route path="/mover/scan" element={<RoleGuard role="mover"><Page><MoverScan /></Page></RoleGuard>} />
+        <Route path="/mover/profile" element={<RoleGuard role="mover"><Page><MoverProfile /></Page></RoleGuard>} />
+        <Route path="/mover/earnings" element={<RoleGuard role="mover"><Page><MoverEarnings /></Page></RoleGuard>} />
+        <Route path="/mover/documents" element={<RoleGuard role="mover"><Page><MoverDocuments /></Page></RoleGuard>} />
+        <Route path="/mover/notifications" element={<RoleGuard role="mover"><Page><MoverNotifications /></Page></RoleGuard>} />
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

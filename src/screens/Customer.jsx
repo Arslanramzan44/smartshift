@@ -18,10 +18,13 @@ import {
   LogOut,
   ChevronRight,
   ShieldCheck,
+  Banknote,
+  BadgeCheck,
 } from 'lucide-react'
 import { Button, Card, Badge, Stagger, Item, MapView, money } from '../components/ui'
 import { TopBar, BottomNav, NotifBell } from '../components/nav'
-import { customerStats, recentMoves, ratingTags, tipOptions } from '../lib/data'
+import { customerStats, recentMoves, ratingTags, tipOptions, customerNotifications } from '../lib/data'
+import { clearRole } from '../lib/auth'
 
 const statIcons = { clipboard: ClipboardList, truck: Truck, check: CheckCircle2, x: XCircle }
 
@@ -355,6 +358,58 @@ export function CustomerMoves() {
   )
 }
 
+/* ===================== Alerts (customer) ===================== */
+const notifIcons = { truck: Truck, cash: Banknote, verified: BadgeCheck, star: Star }
+const notifTone = {
+  brand: 'bg-brand-50 text-brand-600',
+  green: 'bg-emerald-50 text-emerald-600',
+  amber: 'bg-amber-50 text-amber-600',
+}
+
+export function CustomerAlerts() {
+  return (
+    <div className="flex min-h-screen flex-col">
+      <TopBar title="SmartShift" back brand />
+      <Stagger className="flex-1 space-y-5 px-5 pb-6">
+        <Item>
+          <h1 className="text-xl font-extrabold text-ink">Notifications</h1>
+        </Item>
+        {customerNotifications.map((grp) => (
+          <Item key={grp.group} className="space-y-3">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">{grp.group}</p>
+            {grp.items.map((n, i) => {
+              const Icon = notifIcons[n.icon]
+              return (
+                <Card key={i} className="p-4">
+                  <div className="flex gap-3">
+                    <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl ${notifTone[n.tone]}`}>
+                      <Icon className="h-5 w-5" />
+                    </span>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <p className={`text-sm font-bold ${n.accent ? 'text-brand-600' : 'text-ink'}`}>{n.title}</p>
+                        {n.accent && <span className="h-2 w-2 rounded-full bg-brand-500" />}
+                      </div>
+                      <p className="mt-0.5 text-xs text-slate-500">{n.text}</p>
+                      {n.cta && (
+                        <Link to="/customer/track">
+                          <Button className="mt-3">{n.cta}</Button>
+                        </Link>
+                      )}
+                      {n.when && <p className="mt-1 text-[11px] text-slate-400">{n.when}</p>}
+                    </div>
+                  </div>
+                </Card>
+              )
+            })}
+          </Item>
+        ))}
+      </Stagger>
+      <BottomNav role="customer" />
+    </div>
+  )
+}
+
 /* ===================== Profile (customer) ===================== */
 export function CustomerProfile() {
   const nav = useNavigate()
@@ -404,7 +459,7 @@ export function CustomerProfile() {
                 <ChevronRight className="h-4 w-4 text-slate-300" />
               </button>
             ))}
-            <button onClick={() => nav('/')} className="flex w-full items-center gap-3 p-4 text-left text-rose-500">
+            <button onClick={() => { clearRole(); nav('/') }} className="flex w-full items-center gap-3 p-4 text-left text-rose-500">
               <span className="grid h-9 w-9 place-items-center rounded-xl bg-rose-50">
                 <LogOut className="h-4 w-4" />
               </span>
