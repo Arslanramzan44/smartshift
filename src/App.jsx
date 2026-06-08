@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Routes, Route, useLocation, Link, Navigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import { LayoutGrid, X } from 'lucide-react'
-import { Onboarding, Register, RoleSelect, Login } from './screens/Auth'
+import { Onboarding, Register, RoleSelect, Login, ForgotPassword } from './screens/Auth'
 import {
   CustomerDashboard,
   CustomerTrack,
@@ -30,6 +30,7 @@ const SCREENS = [
   ['Register', '/register'],
   ['Role Select', '/role'],
   ['Login', '/login'],
+  ['Forgot Password', '/forgot'],
   ['Customer · Home', '/customer'],
   ['Customer · Book', '/customer/book'],
   ['Customer · Moves', '/customer/moves'],
@@ -81,6 +82,7 @@ function AnimatedRoutes() {
         <Route path="/register" element={<Page><Register /></Page>} />
         <Route path="/role" element={<Page><RoleSelect /></Page>} />
         <Route path="/login" element={<Page><Login /></Page>} />
+        <Route path="/forgot" element={<Page><ForgotPassword /></Page>} />
 
         <Route path="/customer" element={<RoleGuard role="customer"><Page><CustomerDashboard /></Page></RoleGuard>} />
         <Route path="/customer/book" element={<RoleGuard role="customer"><Page><BookWizard /></Page></RoleGuard>} />

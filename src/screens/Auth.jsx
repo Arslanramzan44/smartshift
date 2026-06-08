@@ -1,10 +1,10 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, Navigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ArrowRight, ArrowLeft, Eye, EyeOff, Mail, Lock, Home, Truck, Package, Check } from 'lucide-react'
+import { ArrowRight, Eye, EyeOff, Mail, Lock, Home, Truck, Package, Check } from 'lucide-react'
 import { Button, Field, Logo, Card, Stagger, Item } from '../components/ui'
 import { TopBar } from '../components/nav'
-import { setRole } from '../lib/auth'
+import { setRole, getRole, homeFor } from '../lib/auth'
 
 /* ===================== Onboarding ===================== */
 const slides = [
@@ -106,6 +106,8 @@ export function Onboarding() {
 export function Register() {
   const nav = useNavigate()
   const [show, setShow] = useState(false)
+  const role = getRole()
+  if (!role) return <Navigate to="/role" replace />
   return (
     <div className="min-h-screen">
       <TopBar title="Create Account" back />
@@ -117,7 +119,7 @@ export function Register() {
             <form
               onSubmit={(e) => {
                 e.preventDefault()
-                nav('/role')
+                nav(homeFor(role))
               }}
               className="space-y-3.5"
             >
@@ -161,10 +163,9 @@ const roles = [
 export function RoleSelect() {
   const [sel, setSel] = useState('customer')
   const nav = useNavigate()
-  const target = roles.find((r) => r.id === sel).to
   const go = () => {
     setRole(sel)
-    nav(target)
+    nav('/login')
   }
   return (
     <div className="flex min-h-screen flex-col px-5 pb-8 pt-14">
@@ -215,20 +216,22 @@ export function RoleSelect() {
 export function Login() {
   const nav = useNavigate()
   const [show, setShow] = useState(false)
+  const role = getRole()
+  if (!role) return <Navigate to="/role" replace />
   return (
     <div className="flex min-h-screen flex-col px-5 pb-8 pt-14">
       <Stagger className="flex flex-1 flex-col">
         <Item className="flex flex-col items-center">
           <Logo size="lg" />
           <h1 className="mt-6 text-3xl font-extrabold text-ink">Welcome Back</h1>
-          <p className="mt-2 text-sm text-slate-500">Sign in to continue your moving journey</p>
+          <p className="mt-2 text-sm text-slate-500">Sign in as {role === 'mover' ? 'Mover' : 'Customer'}</p>
         </Item>
         <Item className="mt-8 space-y-4">
           <Field label="Email Address" icon={Mail} type="email" placeholder="name@example.com" />
           <div>
             <div className="mb-1.5 flex items-center justify-between">
               <span className="text-xs font-semibold text-slate-500">Password</span>
-              <button className="text-xs font-bold text-brand-600">Forgot Password?</button>
+              <button onClick={() => nav('/forgot')} className="text-xs font-bold text-brand-600">Forgot Password?</button>
             </div>
             <Field
               icon={Lock}
@@ -241,7 +244,7 @@ export function Login() {
               }
             />
           </div>
-          <Button onClick={() => nav('/role')} className="mt-2">
+          <Button onClick={() => nav(homeFor(role))} className="mt-2">
             Login <ArrowRight className="h-4 w-4" />
           </Button>
         </Item>
@@ -251,6 +254,72 @@ export function Login() {
             Register
           </Link>
         </Item>
+      </Stagger>
+    </div>
+  )
+}
+
+/* ===================== Forgot password ===================== */
+export function ForgotPassword() {
+  const nav = useNavigate()
+  const [sent, setSent] = useState(false)
+  return (
+    <div className="flex min-h-screen flex-col">
+      <TopBar title="Reset Password" back />
+      <Stagger className="flex flex-1 flex-col px-5 pb-8">
+        {!sent ? (
+          <>
+            <Item className="flex flex-col items-center pt-2 text-center">
+              <span className="grid h-16 w-16 place-items-center rounded-full bg-brand-50 text-brand-600">
+                <Lock className="h-8 w-8" />
+              </span>
+              <h1 className="mt-4 text-2xl font-extrabold text-ink">Forgot Password?</h1>
+              <p className="mx-auto mt-2 max-w-xs text-sm text-slate-500">
+                Enter the email tied to your account and we'll send a reset link.
+              </p>
+            </Item>
+            <Item className="mt-8">
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  setSent(true)
+                }}
+                className="space-y-4"
+              >
+                <Field label="Email Address" icon={Mail} type="email" placeholder="name@example.com" />
+                <Button type="submit" className="mt-2">
+                  Send Reset Link <ArrowRight className="h-4 w-4" />
+                </Button>
+              </form>
+            </Item>
+            <Item className="mt-auto pt-8 text-center text-sm text-slate-500">
+              Remembered it?{' '}
+              <Link to="/login" className="font-bold text-brand-600">
+                Back to Login
+              </Link>
+            </Item>
+          </>
+        ) : (
+          <>
+            <Item className="flex flex-1 flex-col items-center justify-center text-center">
+              <motion.span
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                transition={{ type: 'spring', stiffness: 200, delay: 0.1 }}
+                className="grid h-16 w-16 place-items-center rounded-full bg-emerald-100"
+              >
+                <Check className="h-9 w-9 text-emerald-500" />
+              </motion.span>
+              <h1 className="mt-4 text-2xl font-extrabold text-ink">Check Your Email</h1>
+              <p className="mx-auto mt-2 max-w-xs text-sm text-slate-500">
+                We sent a password reset link to your inbox. Follow it to set a new password.
+              </p>
+            </Item>
+            <Item>
+              <Button onClick={() => nav('/login')}>Back to Login</Button>
+            </Item>
+          </>
+        )}
       </Stagger>
     </div>
   )
