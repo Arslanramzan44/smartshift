@@ -22,11 +22,14 @@ import {
   AlertCircle,
   Check,
   Info,
+  Warehouse,
+  Boxes,
 } from 'lucide-react'
 import { Button, Card, Field, money } from '../components/ui'
 import { RouteMap, PlacesField } from '../components/maps'
 import { TopBar } from '../components/nav'
 import { vehicles, services, bookingItems } from '../lib/data'
+import { STORAGE_UNITS, STORAGE_DURATIONS, WAREHOUSES, storagePrice, createStorageBooking } from '../lib/storage'
 import { useAuth } from '../lib/AuthContext'
 import { createBooking } from '../lib/bookings'
 
@@ -70,6 +73,7 @@ export function BookWizard() {
   const [dir, setDir] = useState(1)
   const [vehicle, setVehicle] = useState('van')
   const [extras, setExtras] = useState([])
+  const [storage, setStorage] = useState({ on: false, unit: 'medium', duration: 'm1' })
   const [items, setItems] = useState(bookingItems.map((it) => ({ ...it, qty: 1 })))
   const [pickup, setPickup] = useState('')
   const [dropoff, setDropoff] = useState('')
@@ -83,7 +87,10 @@ export function BookWizard() {
   const vehicleObj = vehicles.find((v) => v.id === vehicle)
   const vehiclePrice = vehicleObj.price
   const extrasTotal = services.filter((s) => extras.includes(s.id)).reduce((a, s) => a + s.price, 0)
-  const total = vehiclePrice + extrasTotal
+  const storageDur = STORAGE_DURATIONS.find((d) => d.id === storage.duration)
+  const storageTotal = storage.on ? storagePrice(storage.unit, storageDur.days) : 0
+  const addOnsTotal = extrasTotal + storageTotal
+  const total = vehiclePrice + addOnsTotal
 
   async function submitBooking() {
     setErr('')
@@ -108,6 +115,25 @@ export function BookWizard() {
         },
         items,
       )
+      // Optional add-on: also reserve a warehouse unit. Best-effort — never
+      // block the move booking if the storage table isn't set up.
+      if (storage.on) {
+        try {
+          const u = STORAGE_UNITS.find((x) => x.id === storage.unit)
+          await createStorageBooking({
+            customer_id: user.id,
+            unit_size: u.name,
+            warehouse: WAREHOUSES[0],
+            duration_label: storageDur.label,
+            days: storageDur.days,
+            start_date: null,
+            price: storageTotal,
+            status: 'reserved',
+          })
+        } catch {
+          // ignore — move booking already placed
+        }
+      }
       nav('/customer/track', { state: { bookingId: booking.id } })
     } catch (e2) {
       setErr(e2.message || 'Could not place booking.')
@@ -173,11 +199,14 @@ export function BookWizard() {
                 toggleExtra={toggleExtra}
                 vehiclePrice={vehiclePrice}
                 extrasTotal={extrasTotal}
+                storage={storage}
+                setStorage={setStorage}
+                storageTotal={storageTotal}
               />
             )}
             {step === 2 && <StepItems items={items} setItems={setItems} />}
-            {step === 3 && <StepSummary vehicle={vehicle} items={items} pickup={pickup} dropoff={dropoff} scheduleLabel={scheduleLabel} total={total} />}
-            {step === 4 && <StepPayment vehiclePrice={vehiclePrice} extrasTotal={extrasTotal} total={total} pickup={pickup} dropoff={dropoff} />}
+            {step === 3 && <StepSummary vehicle={vehicle} items={items} pickup={pickup} dropoff={dropoff} scheduleLabel={scheduleLabel} total={total} storage={storage} storageDur={storageDur} storageTotal={storageTotal} />}
+            {step === 4 && <StepPayment vehiclePrice={vehiclePrice} addOnsTotal={addOnsTotal} total={total} pickup={pickup} dropoff={dropoff} />}
           </motion.div>
         </AnimatePresence>
       </div>
@@ -254,7 +283,7 @@ function StepLocations({ pickup, setPickup, dropoff, setDropoff, scheduleLabel, 
 }
 
 /* ---------- Step 2: Vehicle & Services ---------- */
-function StepVehicle({ vehicle, setVehicle, extras, toggleExtra, vehiclePrice, extrasTotal }) {
+function StepVehicle({ vehicle, setVehicle, extras, toggleExtra, vehiclePrice, extrasTotal, storage, setStorage, storageTotal }) {
   return (
     <>
       <div>
@@ -305,6 +334,66 @@ function StepVehicle({ vehicle, setVehicle, extras, toggleExtra, vehiclePrice, e
         })}
       </Card>
 
+      {/* warehouse storage add-on */}
+      <h3 className="pt-1 text-base font-bold text-ink">Warehouse Storage</h3>
+      <Card className="p-4">
+        <button onClick={() => setStorage((s) => ({ ...s, on: !s.on }))} className="flex w-full items-center gap-3 text-left">
+          <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${storage.on ? 'bg-brand-600 text-white' : 'bg-brand-50 text-brand-500'}`}>
+            <Warehouse className="h-5 w-5" />
+          </span>
+          <span className="flex-1">
+            <span className="block text-sm font-semibold text-ink">Add secure storage</span>
+            <span className="block text-[11px] text-slate-400">Store items in a warehouse before/after the move</span>
+          </span>
+          <span className={`relative h-6 w-11 rounded-full transition ${storage.on ? 'bg-brand-600' : 'bg-slate-200'}`}>
+            <span className={`absolute top-1 h-4 w-4 rounded-full bg-white transition-all ${storage.on ? 'left-6' : 'left-1'}`} />
+          </span>
+        </button>
+
+        {storage.on && (
+          <div className="mt-4 space-y-3 border-t border-slate-100 pt-4">
+            <div>
+              <p className="mb-1.5 text-xs font-semibold text-slate-500">Unit Size</p>
+              <div className="grid grid-cols-3 gap-2">
+                {STORAGE_UNITS.map((u) => (
+                  <button
+                    key={u.id}
+                    onClick={() => setStorage((s) => ({ ...s, unit: u.id }))}
+                    className={`rounded-xl border p-2 text-center transition ${
+                      storage.unit === u.id ? 'border-brand-600 bg-brand-50' : 'border-slate-200'
+                    }`}
+                  >
+                    <Boxes className={`mx-auto h-4 w-4 ${storage.unit === u.id ? 'text-brand-600' : 'text-slate-400'}`} />
+                    <span className="mt-1 block text-[11px] font-bold text-ink">{u.name.replace(' Unit', '')}</span>
+                    <span className="block text-[9px] text-slate-400">{money(u.rate)}/d</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <p className="mb-1.5 text-xs font-semibold text-slate-500">Duration</p>
+              <div className="flex flex-wrap gap-2">
+                {STORAGE_DURATIONS.map((d) => (
+                  <button
+                    key={d.id}
+                    onClick={() => setStorage((s) => ({ ...s, duration: d.id }))}
+                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                      storage.duration === d.id ? 'border-brand-600 bg-brand-50 text-brand-700' : 'border-slate-200 text-slate-600'
+                    }`}
+                  >
+                    {d.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex justify-between rounded-xl bg-brand-50 px-3 py-2 text-sm font-bold text-brand-700">
+              <span>Storage subtotal</span>
+              <span>{money(storageTotal)}</span>
+            </div>
+          </div>
+        )}
+      </Card>
+
       <Card className="space-y-2 bg-brand-50/60 p-4 ring-1 ring-brand-100">
         <p className="text-sm font-bold text-ink">Summary</p>
         <div className="flex justify-between text-sm text-slate-600">
@@ -315,9 +404,15 @@ function StepVehicle({ vehicle, setVehicle, extras, toggleExtra, vehiclePrice, e
           <span>Additional Services</span>
           <span>{money(extrasTotal)}</span>
         </div>
+        {storage.on && (
+          <div className="flex justify-between text-sm text-slate-600">
+            <span>Warehouse Storage</span>
+            <span>{money(storageTotal)}</span>
+          </div>
+        )}
         <div className="flex justify-between border-t border-brand-100 pt-2 text-base font-extrabold text-brand-700">
           <span className="text-ink">Estimated Total</span>
-          <span>{money(vehiclePrice + extrasTotal)}</span>
+          <span>{money(vehiclePrice + extrasTotal + storageTotal)}</span>
         </div>
       </Card>
     </>
@@ -542,8 +637,9 @@ function StepItems({ items, setItems }) {
 }
 
 /* ---------- Step 4: Summary ---------- */
-function StepSummary({ vehicle, items, pickup, dropoff, scheduleLabel, total }) {
+function StepSummary({ vehicle, items, pickup, dropoff, scheduleLabel, total, storage, storageDur, storageTotal }) {
   const v = vehicles.find((x) => x.id === vehicle)
+  const servicesOnly = total - v.price - (storage.on ? storageTotal : 0)
   return (
     <>
       <h2 className="text-xl font-extrabold text-ink">Review Your Booking</h2>
@@ -574,8 +670,14 @@ function StepSummary({ vehicle, items, pickup, dropoff, scheduleLabel, total }) 
         </div>
         <div className="mt-1 flex justify-between text-sm text-slate-600">
           <span>Additional Services</span>
-          <span>{money(total - v.price)}</span>
+          <span>{money(servicesOnly)}</span>
         </div>
+        {storage.on && (
+          <div className="mt-1 flex justify-between text-sm text-slate-600">
+            <span>Warehouse Storage ({storageDur.label})</span>
+            <span>{money(storageTotal)}</span>
+          </div>
+        )}
         <div className="mt-3 flex justify-between border-t border-slate-100 pt-3 text-base font-extrabold">
           <span className="text-ink">Total Amount</span>
           <span className="text-brand-700">{money(total)}</span>
@@ -597,7 +699,7 @@ function Info2({ icon: Icon, label, value }) {
 }
 
 /* ---------- Step 5: Payment / Checkout ---------- */
-function StepPayment({ vehiclePrice, extrasTotal, total, pickup, dropoff }) {
+function StepPayment({ vehiclePrice, addOnsTotal, total, pickup, dropoff }) {
   const [save, setSave] = useState(false)
   return (
     <>
@@ -648,8 +750,8 @@ function StepPayment({ vehiclePrice, extrasTotal, total, pickup, dropoff }) {
           <span className="font-semibold text-ink">{money(vehiclePrice)}</span>
         </div>
         <div className="mt-2 flex justify-between text-sm text-slate-600">
-          <span>Additional Services</span>
-          <span className="font-semibold text-ink">{money(extrasTotal)}</span>
+          <span>Add-ons & Services</span>
+          <span className="font-semibold text-ink">{money(addOnsTotal)}</span>
         </div>
         <div className="mt-3 flex justify-between border-t border-slate-100 pt-3 text-base font-extrabold">
           <span className="text-ink">Total Amount</span>

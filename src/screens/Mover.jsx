@@ -1064,9 +1064,6 @@ export function MoverEarnings() {
           <Card className="bg-gradient-to-br from-brand-50 to-white p-5 ring-1 ring-brand-100">
             <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Total Earnings</p>
             <p className="mt-1 text-3xl font-extrabold text-ink">{money(totalEarnings)}</p>
-            <Button className="mt-4">
-              <Wallet className="h-4 w-4" /> Withdraw
-            </Button>
           </Card>
         </Item>
         <Item>

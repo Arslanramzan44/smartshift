@@ -47,3 +47,33 @@ npm run dev
 4. **Mover** scans each item's QR during the job (`booking_items.scanned`).
 5. **Customer** sees live status on **Track** and **My Moves**.
 
+## Warehouse storage (run this SQL)
+The storage feature (`/customer/storage`) needs its own table. Run in
+Dashboard → SQL Editor:
+
+```sql
+create table if not exists public.storage_bookings (
+  id uuid primary key default gen_random_uuid(),
+  customer_id uuid not null references auth.users(id) on delete cascade,
+  unit_size text not null,
+  warehouse text not null,
+  duration_label text not null,
+  days int not null,
+  start_date date,
+  price numeric not null,
+  status text not null default 'reserved',
+  created_at timestamptz not null default now()
+);
+
+alter table public.storage_bookings enable row level security;
+
+create policy "own storage" on public.storage_bookings
+  for all
+  using (auth.uid() = customer_id)
+  with check (auth.uid() = customer_id);
+```
+
+Customer picks a unit size (Small/Medium/Large), duration (1 week → 3 months),
+warehouse, and start date; price = daily rate × days. Reservations are
+RLS-scoped to the owner.
+

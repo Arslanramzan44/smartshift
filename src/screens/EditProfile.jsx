@@ -38,7 +38,10 @@ export default function EditProfile() {
     if (!form.full_name.trim()) return setErr('Full name is required.')
     setBusy(true)
     try {
+      // Spread the existing profile so not-null columns (role, email, …) are
+      // carried through the upsert; only name/phone (and files) change.
       const update = {
+        ...profile,
         id: user.id,
         full_name: form.full_name.trim(),
         phone: form.phone.trim() || null,

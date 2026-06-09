@@ -16,6 +16,7 @@ import {
 } from './screens/Customer'
 import { getRole, homeFor } from './lib/auth'
 import { BookWizard } from './screens/Book'
+import { WarehouseStorage } from './screens/Storage'
 import { SettingsScreen } from './screens/Settings'
 import {
   MoverDashboard,
@@ -40,6 +41,7 @@ const SCREENS = [
   ['Edit Profile', '/profile/edit'],
   ['Customer · Home', '/customer'],
   ['Customer · Book', '/customer/book'],
+  ['Customer · Storage', '/customer/storage'],
   ['Customer · Moves', '/customer/moves'],
   ['Customer · Track', '/customer/track'],
   ['Customer · Rating', '/customer/rating'],
@@ -116,6 +118,7 @@ function AnimatedRoutes() {
 
         <Route path="/customer" element={<RoleGuard role="customer"><Page><CustomerDashboard /></Page></RoleGuard>} />
         <Route path="/customer/book" element={<RoleGuard role="customer"><Page><BookWizard /></Page></RoleGuard>} />
+        <Route path="/customer/storage" element={<RoleGuard role="customer"><Page><WarehouseStorage /></Page></RoleGuard>} />
         <Route path="/customer/moves" element={<RoleGuard role="customer"><Page><CustomerMoves /></Page></RoleGuard>} />
         <Route path="/customer/track" element={<RoleGuard role="customer"><Page><CustomerTrack /></Page></RoleGuard>} />
         <Route path="/customer/rating" element={<RoleGuard role="customer"><Page><CustomerRating /></Page></RoleGuard>} />

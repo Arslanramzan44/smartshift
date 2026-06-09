@@ -24,6 +24,9 @@ import {
   Loader2,
   Inbox,
   User,
+  Warehouse,
+  Phone,
+  MessageSquare,
 } from 'lucide-react'
 import { Button, Card, Badge, Stagger, Item, money, memberSince } from '../components/ui'
 import { RouteMap } from '../components/maps'
@@ -31,6 +34,7 @@ import { TopBar, BottomNav } from '../components/nav'
 import { ratingTags, tipOptions, customerNotifications } from '../lib/data'
 import { useAuth } from '../lib/AuthContext'
 import { listCustomerBookings, getBooking, STATUS_LABEL, STATUS_FLOW, statusTone, deliveryPayload } from '../lib/bookings'
+import { getProfile } from '../lib/db'
 import { QRCodeSVG } from 'qrcode.react'
 import { ShieldCheck } from 'lucide-react'
 import hero from '../assets/hero.png'
@@ -140,6 +144,22 @@ export function CustomerDashboard() {
           </div>
         </Item>
 
+        {/* storage promo */}
+        <Item>
+          <Link to="/customer/storage">
+            <Card className="flex items-center gap-3 p-4">
+              <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600">
+                <Warehouse className="h-6 w-6" />
+              </span>
+              <div className="flex-1">
+                <p className="text-sm font-bold text-ink">Need Storage?</p>
+                <p className="text-[11px] text-slate-400">Reserve a secure warehouse unit by the day, week, or month.</p>
+              </div>
+              <ArrowRight className="h-4 w-4 text-slate-300" />
+            </Card>
+          </Link>
+        </Item>
+
         {/* stats grid */}
         <Item className="grid grid-cols-2 gap-3">
           {stats.map((s) => {
@@ -191,6 +211,7 @@ export function CustomerTrack() {
   const { state } = useLocation()
   const { user, profile } = useAuth()
   const [booking, setBooking] = useState(null)
+  const [mover, setMover] = useState(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -210,6 +231,15 @@ export function CustomerTrack() {
     }
     if (user) load()
   }, [user?.id, state?.bookingId])
+
+  // Load the assigned mover's profile (name / phone / verification).
+  useEffect(() => {
+    if (!booking?.mover_id) {
+      setMover(null)
+      return
+    }
+    getProfile(booking.mover_id).then(setMover).catch(() => setMover(null))
+  }, [booking?.mover_id])
 
   // Live updates: while the move is active, refetch so mover status changes
   // (and the delivery confirmation) appear without a manual reload.
@@ -264,6 +294,50 @@ export function CustomerTrack() {
                 <Share2 className="h-4 w-4" />
               </button>
             </div>
+
+            {booking.mover_id && (
+              <Card className="my-4 p-4 ring-1 ring-slate-100">
+                <div className="flex items-center gap-3">
+                  <span className="relative">
+                    {mover?.avatar_url ? (
+                      <img src={mover.avatar_url} className="h-12 w-12 rounded-full object-cover" alt="" />
+                    ) : (
+                      <span className="grid h-12 w-12 place-items-center rounded-full bg-brand-50 text-lg font-bold text-brand-600">
+                        {(mover?.full_name || 'M')[0]}
+                      </span>
+                    )}
+                    <span className="absolute -bottom-0.5 -right-0.5 grid h-5 w-5 place-items-center rounded-full bg-brand-600 text-white ring-2 ring-white">
+                      <BadgeCheck className="h-3 w-3" />
+                    </span>
+                  </span>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-sm font-bold text-ink">{mover?.full_name || 'Your Mover'}</p>
+                      <Badge tone="green">Verified</Badge>
+                    </div>
+                    <p className="flex items-center gap-1 text-xs text-slate-500">
+                      <Phone className="h-3 w-3" /> {mover?.phone || 'Contact via app'}
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-3 flex gap-3">
+                  {mover?.phone ? (
+                    <a href={`tel:${mover.phone}`} className="flex-1">
+                      <Button><Phone className="h-4 w-4" /> Call</Button>
+                    </a>
+                  ) : (
+                    <Button className="flex-1"><Phone className="h-4 w-4" /> Call</Button>
+                  )}
+                  {mover?.phone ? (
+                    <a href={`sms:${mover.phone}`} className="flex-1">
+                      <Button variant="ghost"><MessageSquare className="h-4 w-4" /> Message</Button>
+                    </a>
+                  ) : (
+                    <Button variant="ghost" className="flex-1"><MessageSquare className="h-4 w-4" /> Message</Button>
+                  )}
+                </div>
+              </Card>
+            )}
 
             {booking.status === 'at_dropoff' && (
               <Card className="my-4 flex flex-col items-center gap-2 border-2 border-brand-200 p-5 text-center">
