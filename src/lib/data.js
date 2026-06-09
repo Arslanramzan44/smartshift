@@ -135,18 +135,18 @@ export const customerNotifications = [
   {
     group: 'Today',
     items: [
-      { icon: 'truck', tone: 'brand', title: 'Mover On The Way', accent: true, text: 'Ahmed Khan is en route to your pickup for Move #SM-8492.', cta: 'Track Move' },
-      { icon: 'cash', tone: 'green', title: 'Payment Confirmed', text: 'Your payment of PKR 4,500 for Move #SM-8492 was successful.', when: '2 hours ago' },
+      { icon: 'truck', tone: 'brand', title: 'Mover On The Way', accent: true, text: 'Your SmartShift mover, David, is currently 15 minutes away from your pickup location at 123 Maple St.', cta: 'Track Move', when: '24m ago' },
+      { icon: 'cash', tone: 'brand', title: 'Payment Confirmed', text: "We've successfully processed your payment of $342.00 for the 'Standard 2BR' move scheduled today. Your invoice #SS-8291 is ready.", when: '2h ago' },
     ],
   },
   {
     group: 'Yesterday',
     items: [
-      { icon: 'verified', tone: 'brand', title: 'Booking Confirmed', text: 'Your move on Oct 24 has been confirmed. A mover will be assigned soon.', when: 'Yesterday, 4:30 PM' },
-      { icon: 'star', tone: 'amber', title: 'Rate Your Move', text: 'How was your last move? Leave a review for Ahmed Khan.', when: 'Yesterday, 10:15 AM' },
+      { icon: 'star', tone: 'amber', title: 'How was your move?', text: 'Share your experience with SmartShift! Ratings help our drivers improve and earn rewards.', when: 'Yesterday', stars: true },
+      { icon: 'verified', tone: 'green', title: 'Move Completed', text: 'Success! Your items have been safely delivered to 456 Oak Avenue. Thank you for choosing SmartShift.', when: 'Yesterday' },
     ],
   },
 ]
 
-export const ratingTags = ['Punctual', 'Professional', 'Careful with Items', 'Great Communication']
+export const ratingTags = ['Punctual', 'Professional', 'Careful Handling', 'Friendly']
 export const tipOptions = [200, 500, 1000]

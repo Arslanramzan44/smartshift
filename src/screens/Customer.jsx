@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
   ArrowRight,
@@ -8,69 +8,147 @@ import {
   CheckCircle2,
   XCircle,
   MapPin,
+  Flag,
   Navigation,
-  Phone,
-  MessageSquare,
   Star,
   Gift,
-  Settings,
   CreditCard,
   LogOut,
   ChevronRight,
-  ShieldCheck,
-  Banknote,
+  Calendar,
+  Share2,
+  Route as RouteIcon,
   BadgeCheck,
+  Banknote,
+  UserPen,
+  Loader2,
+  Inbox,
+  User,
 } from 'lucide-react'
-import { Button, Card, Badge, Stagger, Item, MapView, money } from '../components/ui'
-import { TopBar, BottomNav, NotifBell } from '../components/nav'
-import { customerStats, recentMoves, ratingTags, tipOptions, customerNotifications } from '../lib/data'
-import { clearRole } from '../lib/auth'
+import { Button, Card, Badge, Stagger, Item, money, memberSince } from '../components/ui'
+import { RouteMap } from '../components/maps'
+import { TopBar, BottomNav } from '../components/nav'
+import { ratingTags, tipOptions, customerNotifications } from '../lib/data'
+import { useAuth } from '../lib/AuthContext'
+import { listCustomerBookings, getBooking, STATUS_LABEL, STATUS_FLOW, statusTone, deliveryPayload } from '../lib/bookings'
+import { QRCodeSVG } from 'qrcode.react'
+import { ShieldCheck } from 'lucide-react'
+import hero from '../assets/hero.png'
 
 const statIcons = { clipboard: ClipboardList, truck: Truck, check: CheckCircle2, x: XCircle }
+const statColor = {
+  clipboard: 'text-brand-600',
+  truck: 'text-brand-600',
+  check: 'text-emerald-500',
+  x: 'text-rose-500',
+}
+
+const Avatar = ({ url }) => (
+  <span className="grid h-9 w-9 place-items-center overflow-hidden rounded-full bg-slate-200 text-slate-500">
+    {url ? <img src={url} className="h-full w-full object-cover" alt="" /> : <User className="h-5 w-5" />}
+  </span>
+)
+
+/* shared pickup→drop-off block with pin icons */
+function Route({ pickup, drop }) {
+  return (
+    <div className="space-y-2.5">
+      <div className="relative flex gap-2.5">
+        <MapPin className="h-4 w-4 shrink-0 text-brand-500" />
+        <span className="absolute left-[7px] top-5 h-4 w-px border-l border-dashed border-slate-300" />
+        <div className="-mt-0.5">
+          <p className="text-[11px] font-semibold text-slate-400">Pickup</p>
+          <p className="text-sm text-ink">{pickup}</p>
+        </div>
+      </div>
+      <div className="flex gap-2.5">
+        <Flag className="h-4 w-4 shrink-0 text-rose-500" />
+        <div className="-mt-0.5">
+          <p className="text-[11px] font-semibold text-slate-400">Drop-off</p>
+          <p className="text-sm text-ink">{drop}</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* booking list/recent card */
+function BookingCard({ m, isActive }) {
+  return (
+    <Card className="p-4">
+      <div className="mb-2 flex items-center justify-between">
+        <Badge tone={statusTone(m.status)}>{STATUS_LABEL[m.status]}</Badge>
+        {isActive ? (
+          <Link to="/customer/track" state={{ bookingId: m.id }} className="flex items-center gap-1 text-xs font-bold text-brand-600">
+            Track Move <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        ) : (
+          <span className="text-xs font-bold text-slate-400">Invoice</span>
+        )}
+      </div>
+      <p className="mb-3 text-sm font-bold text-ink">Booking #{String(m.id).slice(0, 8)}</p>
+      <Route pickup={m.pickup_address} drop={m.dropoff_address} />
+    </Card>
+  )
+}
 
 /* ===================== Customer Dashboard ===================== */
 export function CustomerDashboard() {
+  const { user, profile } = useAuth()
+  const [bookings, setBookings] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    if (!user) return
+    listCustomerBookings(user.id)
+      .then(setBookings)
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [user?.id])
+
+  const firstName = (profile?.full_name || 'there').split(' ')[0]
+  const isActive = (s) => !['delivered', 'cancelled'].includes(s)
+  const stats = [
+    { label: 'Total Moves', value: bookings.length, icon: 'clipboard' },
+    { label: 'Active', value: bookings.filter((b) => isActive(b.status)).length, icon: 'truck' },
+    { label: 'Completed', value: bookings.filter((b) => b.status === 'delivered').length, icon: 'check' },
+    { label: 'Cancelled', value: bookings.filter((b) => b.status === 'cancelled').length, icon: 'x' },
+  ]
+  const recent = bookings.slice(0, 3)
+
   return (
     <div className="flex min-h-screen flex-col">
-      <div className="flex items-center justify-between px-5 pb-2 pt-10">
-        <div>
-          <p className="text-xs text-slate-400">Welcome back</p>
-          <h1 className="text-xl font-extrabold text-ink">Good morning, Amna 👋</h1>
-        </div>
-        <NotifBell count={2} to="/customer/alerts" />
+      <div className="px-5 pb-2 pt-10">
+        <h1 className="text-2xl font-extrabold text-ink">Hi, {firstName} 👋</h1>
+        <p className="text-sm text-slate-500">Welcome back to your SmartShift dashboard.</p>
       </div>
 
       <Stagger className="flex-1 space-y-5 px-5 pb-6">
         {/* hero */}
         <Item>
           <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-brand-600 to-brand-800 p-5 text-white shadow-[var(--shadow-float)]">
-            <div className="absolute -right-6 -top-6 h-32 w-32 rounded-full bg-white/10" />
-            <div className="relative max-w-[62%]">
-              <h2 className="text-lg font-extrabold">Ready to Move?</h2>
-              <p className="mt-1 text-xs text-brand-100">Book your next seamless shift today.</p>
-              <Link to="/customer/book">
-                <Button variant="ghost" className="mt-4 w-auto px-5 text-brand-700">
-                  Book Now <ArrowRight className="h-4 w-4" />
-                </Button>
-              </Link>
-            </div>
-            <Truck className="animate-float absolute bottom-3 right-3 h-20 w-20 text-white/90" strokeWidth={1.2} />
+            <h2 className="text-lg font-extrabold">Ready to Move?</h2>
+            <p className="mt-1 max-w-[85%] text-xs text-brand-100">
+              Schedule your next seamless relocation in just a few clicks. Fast, reliable, and insured logistics.
+            </p>
+            <Link to="/customer/book">
+              <Button variant="ghost" className="mt-4 w-auto px-5 text-brand-700">
+                Book Now
+              </Button>
+            </Link>
+            <img src={hero} className="mt-4 h-28 w-full rounded-2xl object-cover" alt="" />
           </div>
         </Item>
 
         {/* stats grid */}
         <Item className="grid grid-cols-2 gap-3">
-          {customerStats.map((s) => {
+          {stats.map((s) => {
             const Icon = statIcons[s.icon]
             return (
-              <Card key={s.label} className="flex items-center justify-between p-4">
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{s.label}</p>
-                  <p className="mt-1 text-2xl font-extrabold text-ink">{s.value}</p>
-                </div>
-                <span className="grid h-9 w-9 place-items-center rounded-xl bg-brand-50 text-brand-600">
-                  <Icon className="h-5 w-5" />
-                </span>
+              <Card key={s.label} className="p-4">
+                <Icon className={`h-5 w-5 ${statColor[s.icon]}`} />
+                <p className="mt-2 text-2xl font-extrabold text-ink">{String(s.value).padStart(2, '0')}</p>
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{s.label}</p>
               </Card>
             )
           })}
@@ -84,105 +162,156 @@ export function CustomerDashboard() {
           </Link>
         </Item>
 
-        {recentMoves.map((m) => (
-          <Item key={m.id}>
-            <Card className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-bold text-ink">Move ID: #{m.id}</p>
-                  <p className="text-xs text-slate-400">{m.when}</p>
-                </div>
-                <Badge tone={m.tone}>{m.status}</Badge>
-              </div>
-              <div className="my-3 space-y-2">
-                <Route pickup={m.pickup} drop={m.drop} />
-              </div>
-              {m.tone === 'progress' ? (
-                <Link to="/customer/track">
-                  <Button>
-                    <Navigation className="h-4 w-4" /> Track Move
-                  </Button>
-                </Link>
-              ) : (
-                <Button variant="ghost">View Details</Button>
-              )}
+        {loading ? (
+          <Item className="grid place-items-center py-8 text-slate-400">
+            <Loader2 className="h-6 w-6 animate-spin" />
+          </Item>
+        ) : recent.length === 0 ? (
+          <Item>
+            <Card className="flex flex-col items-center gap-2 p-8 text-center text-slate-400">
+              <Inbox className="h-8 w-8" />
+              <p className="text-sm font-semibold">No bookings yet</p>
             </Card>
           </Item>
-        ))}
+        ) : (
+          recent.map((m) => (
+            <Item key={m.id}>
+              <BookingCard m={m} isActive={isActive(m.status)} />
+            </Item>
+          ))
+        )}
       </Stagger>
       <BottomNav role="customer" />
     </div>
   )
 }
 
-function Route({ pickup, drop }) {
-  return (
-    <div className="relative pl-5">
-      <span className="absolute left-1 top-1.5 h-2.5 w-2.5 rounded-full bg-brand-500" />
-      <span className="absolute left-[7px] top-3.5 h-6 w-px bg-slate-200" />
-      <span className="absolute bottom-1 left-1 h-2.5 w-2.5 rounded-full bg-rose-500" />
-      <p className="text-[11px] font-semibold text-slate-400">Pickup</p>
-      <p className="mb-2 text-sm text-ink">{pickup}</p>
-      <p className="text-[11px] font-semibold text-slate-400">Drop-off</p>
-      <p className="text-sm text-ink">{drop}</p>
-    </div>
-  )
-}
-
 /* ===================== Live Tracking ===================== */
 export function CustomerTrack() {
-  const steps = [
-    { label: 'Item Picked Up', sub: '11:30 AM', state: 'done' },
-    { label: 'In Transit', sub: 'Current Location', state: 'active' },
-    { label: 'Arriving Soon', sub: 'Estimated 12:45 PM', state: 'pending' },
-  ]
+  const { state } = useLocation()
+  const { user, profile } = useAuth()
+  const [booking, setBooking] = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    async function load() {
+      try {
+        if (state?.bookingId) {
+          setBooking(await getBooking(state.bookingId))
+        } else {
+          const list = await listCustomerBookings(user.id)
+          setBooking(list.find((b) => !['delivered', 'cancelled'].includes(b.status)) || list[0] || null)
+        }
+      } catch {
+        // ignore
+      } finally {
+        setLoading(false)
+      }
+    }
+    if (user) load()
+  }, [user?.id, state?.bookingId])
+
+  // Live updates: while the move is active, refetch so mover status changes
+  // (and the delivery confirmation) appear without a manual reload.
+  useEffect(() => {
+    if (!booking || ['delivered', 'cancelled'].includes(booking.status)) return
+    const t = setInterval(() => {
+      getBooking(booking.id).then(setBooking).catch(() => {})
+    }, 5000)
+    return () => clearInterval(t)
+  }, [booking?.id, booking?.status])
+
+  const idx = booking ? STATUS_FLOW.indexOf(booking.status) : -1
+  const steps = STATUS_FLOW.map((s, i) => ({
+    label: STATUS_LABEL[s],
+    sub: i < idx ? 'Done' : i === idx ? 'Active' : 'Pending',
+    state: i < idx ? 'done' : i === idx ? 'active' : 'pending',
+  }))
+
   return (
     <div className="flex min-h-screen flex-col bg-slate-900">
       <div className="absolute inset-x-0 top-0 z-40">
-        <TopBar title="Track My Move" back kebab dark />
+        <TopBar brandLeft dark avatar={<Avatar url={profile?.avatar_url} />} />
       </div>
       <div className="relative flex-1">
-        <MapView dark className="h-[360px] w-full" />
-        <div className="absolute left-1/2 top-1/3 -translate-x-1/2">
-          <span className="pulse-ring absolute inset-0 rounded-full bg-brand-400" />
-          <span className="relative grid h-5 w-5 place-items-center rounded-full bg-brand-600 ring-4 ring-white" />
-        </div>
+        <RouteMap pickup={booking?.pickup_address} dropoff={booking?.dropoff_address} dark className="h-[360px] w-full" />
       </div>
       <motion.div
         initial={{ y: 60, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
-        className="relative -mt-6 rounded-t-3xl bg-white px-5 pb-8 pt-3"
+        className="relative -mt-6 rounded-t-3xl bg-white px-5 pb-24 pt-3"
       >
         <div className="mx-auto mb-4 h-1.5 w-10 rounded-full bg-slate-200" />
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-2xl font-extrabold text-ink">12:45 PM</p>
-            <p className="text-sm text-brand-600">15 mins away</p>
+        {loading ? (
+          <div className="grid place-items-center py-10 text-slate-400">
+            <Loader2 className="h-6 w-6 animate-spin" />
           </div>
-          <Badge tone="brand">
-            <span className="h-1.5 w-1.5 rounded-full bg-brand-600" /> Live
-          </Badge>
-        </div>
-
-        <Card className="my-4 flex items-center gap-3 p-3 ring-1 ring-slate-100">
-          <img src="https://i.pravatar.cc/80?img=12" className="h-11 w-11 rounded-full object-cover" alt="" />
-          <div className="flex-1">
-            <p className="text-sm font-bold text-ink">Ahmed Khan</p>
-            <p className="flex items-center gap-1 text-xs text-slate-500">
-              <Star className="h-3 w-3 fill-amber-400 text-amber-400" /> 4.9 · Mini Truck (LED-1234)
-            </p>
+        ) : !booking ? (
+          <div className="flex flex-col items-center gap-2 py-10 text-center text-slate-400">
+            <Inbox className="h-8 w-8" />
+            <p className="text-sm font-semibold">No move to track</p>
+            <Link to="/customer/book" className="text-sm font-bold text-brand-600">Book a move</Link>
           </div>
-          <button className="grid h-9 w-9 place-items-center rounded-full bg-slate-100 text-slate-600">
-            <MessageSquare className="h-4 w-4" />
-          </button>
-          <button className="grid h-9 w-9 place-items-center rounded-full bg-brand-600 text-white">
-            <Phone className="h-4 w-4" />
-          </button>
-        </Card>
+        ) : (
+          <>
+            <div className="flex items-start justify-between">
+              <div>
+                <Badge tone={statusTone(booking.status)}>{STATUS_LABEL[booking.status]}</Badge>
+                <p className="mt-2 text-2xl font-extrabold text-ink">Moving to drop-off</p>
+                <p className="text-sm text-slate-500">{booking.mover_id ? 'Mover assigned' : 'Finding a mover near you'}</p>
+              </div>
+              <button className="grid h-9 w-9 place-items-center rounded-full bg-brand-50 text-brand-600">
+                <Share2 className="h-4 w-4" />
+              </button>
+            </div>
 
-        <h3 className="mb-3 text-sm font-bold text-ink">Tracking Details</h3>
-        <Timeline steps={steps} />
+            {booking.status === 'at_dropoff' && (
+              <Card className="my-4 flex flex-col items-center gap-2 border-2 border-brand-200 p-5 text-center">
+                <span className="flex items-center gap-1 text-xs font-bold text-brand-600">
+                  <ShieldCheck className="h-4 w-4" /> Confirm Your Delivery
+                </span>
+                <div className="rounded-2xl bg-white p-3 ring-1 ring-slate-100">
+                  <QRCodeSVG value={deliveryPayload(booking.id)} size={168} fgColor="#1d36ce" />
+                </div>
+                <p className="max-w-[15rem] text-xs text-slate-500">
+                  Show this QR to your mover. They scan it to confirm your items were delivered.
+                </p>
+              </Card>
+            )}
+
+            <Card className="my-4 flex items-center gap-3 p-4 ring-1 ring-slate-100">
+              <span className="grid h-11 w-11 place-items-center rounded-xl bg-brand-50 text-brand-600">
+                <Truck className="h-5 w-5" />
+              </span>
+              <div className="flex-1">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Vehicle</p>
+                <p className="text-sm font-bold text-ink">{booking.vehicle}</p>
+              </div>
+              <p className="text-sm font-extrabold text-brand-700">{money(Number(booking.price))}</p>
+            </Card>
+
+            <Card className="mb-4 flex items-center gap-3 p-4 ring-1 ring-slate-100">
+              <span className="grid h-11 w-11 place-items-center rounded-xl bg-brand-50 text-brand-600">
+                <RouteIcon className="h-5 w-5" />
+              </span>
+              <div className="flex-1">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Route</p>
+                <p className="text-sm font-bold text-ink">{booking.pickup_address} → {booking.dropoff_address}</p>
+              </div>
+            </Card>
+
+            <h3 className="mb-3 text-sm font-bold text-ink">Progress Timeline</h3>
+            <Timeline steps={steps} />
+
+            {booking.status === 'delivered' && (
+              <Link to="/customer/rating" state={{ bookingId: booking.id }}>
+                <Button className="mt-4"><Star className="h-4 w-4" /> Rate this move</Button>
+              </Link>
+            )}
+          </>
+        )}
       </motion.div>
+      <BottomNav role="customer" />
     </div>
   )
 }
@@ -223,11 +352,25 @@ export function CustomerRating() {
   const [tags, setTags] = useState([])
   const [tip, setTip] = useState(null)
   const nav = useNavigate()
+  const { state } = useLocation()
+  const [booking, setBooking] = useState(null)
+
+  useEffect(() => {
+    if (state?.bookingId) getBooking(state.bookingId).then(setBooking).catch(() => {})
+  }, [state?.bookingId])
+
   const toggle = (t) => setTags((p) => (p.includes(t) ? p.filter((x) => x !== t) : [...p, t]))
   return (
     <div className="flex min-h-screen flex-col">
-      <TopBar title="SmartShift" back kebab brand />
-      <Stagger className="flex-1 space-y-4 px-5 pb-8">
+      <TopBar
+        brandLeft
+        avatar={
+          <button className="grid h-9 w-9 place-items-center rounded-full bg-white text-brand-600 ring-1 ring-slate-100">
+            <ClipboardList className="h-5 w-5" />
+          </button>
+        }
+      />
+      <Stagger className="flex-1 space-y-4 px-5 pb-6">
         <Item className="text-center">
           <motion.span
             initial={{ scale: 0 }}
@@ -238,28 +381,28 @@ export function CustomerRating() {
             <CheckCircle2 className="h-9 w-9 text-emerald-500" />
           </motion.span>
           <h1 className="mt-3 text-2xl font-extrabold text-ink">Move Completed!</h1>
-          <p className="mt-1 text-sm text-slate-500">Your items have reached their destination.</p>
+          <p className="mt-1 text-sm text-slate-500">Thank you for moving with SmartShift.</p>
         </Item>
 
         <Item>
-          <Card className="flex items-center gap-3 p-4">
-            <img src="https://i.pravatar.cc/80?img=12" className="h-11 w-11 rounded-full object-cover" alt="" />
-            <div className="flex-1">
-              <p className="text-sm font-bold text-ink">Ahmed Khan</p>
-              <p className="flex items-center gap-1 text-xs text-slate-500">
-                <Truck className="h-3 w-3" /> Mini Truck
-              </p>
+          <Card className="p-5">
+            <div className="flex items-center gap-3">
+              <span className="relative">
+                <img src="https://i.pravatar.cc/80?img=12" className="h-11 w-11 rounded-full object-cover" alt="" />
+                <span className="absolute -bottom-0.5 -right-0.5 grid h-4 w-4 place-items-center rounded-full bg-brand-600 text-white ring-2 ring-white">
+                  <BadgeCheck className="h-2.5 w-2.5" />
+                </span>
+              </span>
+              <div className="flex-1">
+                <p className="text-sm font-bold text-ink">Your SmartShift Mover</p>
+                <p className="flex items-center gap-1 text-xs text-slate-500">
+                  <Truck className="h-3 w-3" /> {booking?.vehicle || 'Move vehicle'}
+                  {booking && <> · #{String(booking.id).slice(0, 8)}</>}
+                </p>
+              </div>
             </div>
-            <div className="text-right">
-              <p className="text-[11px] text-slate-400">Job #</p>
-              <p className="text-sm font-bold text-ink">8492-AX</p>
-            </div>
-          </Card>
-        </Item>
 
-        <Item>
-          <Card className="p-5 text-center">
-            <h3 className="text-lg font-bold text-ink">Rate Your Experience</h3>
+            <p className="mt-5 text-center text-sm font-bold text-ink">Rate your experience</p>
             <div className="mt-3 flex justify-center gap-2">
               {[1, 2, 3, 4, 5].map((n) => (
                 <motion.button key={n} whileTap={{ scale: 1.3 }} onClick={() => setStars(n)}>
@@ -271,7 +414,9 @@ export function CustomerRating() {
                 </motion.button>
               ))}
             </div>
-            <div className="mt-4 flex flex-wrap justify-center gap-2">
+
+            <p className="mt-5 text-sm font-bold text-ink">What went well?</p>
+            <div className="mt-2 flex flex-wrap gap-2">
               {ratingTags.map((t) => (
                 <button
                   key={t}
@@ -286,72 +431,82 @@ export function CustomerRating() {
                 </button>
               ))}
             </div>
-          </Card>
-        </Item>
 
-        <Item>
-          <p className="mb-1.5 text-xs font-semibold text-slate-500">Write a review (optional)</p>
-          <textarea
-            rows={3}
-            placeholder="Tell us about your experience..."
-            className="w-full rounded-xl border border-slate-200 bg-white p-3 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
-          />
-        </Item>
+            <p className="mb-1.5 mt-5 text-sm font-bold text-ink">Write a review (optional)</p>
+            <textarea
+              rows={3}
+              placeholder="How was the move? Ahmad was…"
+              className="w-full rounded-xl border border-slate-200 bg-white p-3 text-base outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100 sm:text-sm"
+            />
 
-        <Item>
-          <div className="mb-2 flex items-center gap-2">
-            <Gift className="h-4 w-4 text-brand-600" />
-            <p className="text-sm font-bold text-ink">Add a tip for Ahmed?</p>
-          </div>
-          <div className="flex gap-2">
-            {tipOptions.map((t) => (
-              <button
-                key={t}
-                onClick={() => setTip(t)}
-                className={`flex-1 rounded-xl border py-2.5 text-sm font-bold transition ${
-                  tip === t ? 'border-brand-600 bg-brand-50 text-brand-700' : 'border-slate-200 text-slate-600'
-                }`}
-              >
-                {money(t).replace('PKR ', 'PKR ')}
+            <p className="mb-2 mt-5 flex items-center gap-2 text-sm font-bold text-ink">
+              <Gift className="h-4 w-4 text-brand-600" /> Add a Tip
+            </p>
+            <div className="flex gap-2">
+              {tipOptions.map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setTip(t)}
+                  className={`flex-1 rounded-xl border py-2.5 text-xs font-bold transition ${
+                    tip === t ? 'border-brand-600 bg-brand-50 text-brand-700' : 'border-slate-200 text-slate-600'
+                  }`}
+                >
+                  {money(t)}
+                </button>
+              ))}
+              <button className="flex-1 rounded-xl border border-slate-200 py-2.5 text-xs font-bold text-slate-600">
+                Other
               </button>
-            ))}
-            <button className="flex-1 rounded-xl border border-slate-200 py-2.5 text-sm font-bold text-slate-600">
-              Custom
-            </button>
-          </div>
+            </div>
+          </Card>
         </Item>
 
         <Item>
           <Button onClick={() => nav('/customer')}>Submit Review</Button>
         </Item>
       </Stagger>
+      <BottomNav role="customer" />
     </div>
   )
 }
 
 /* ===================== Moves list ===================== */
 export function CustomerMoves() {
+  const { user } = useAuth()
+  const [bookings, setBookings] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    if (!user) return
+    listCustomerBookings(user.id)
+      .then(setBookings)
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [user?.id])
+
+  const isActive = (s) => !['delivered', 'cancelled'].includes(s)
+
   return (
     <div className="flex min-h-screen flex-col">
       <TopBar title="My Moves" />
       <Stagger className="flex-1 space-y-4 px-5 pb-6">
-        {recentMoves.concat(recentMoves.map((m) => ({ ...m, id: m.id + '-2', status: 'Completed', tone: 'green' }))).map((m) => (
-          <Item key={m.id}>
-            <Card className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-bold text-ink">Move ID: #{m.id}</p>
-                  <p className="text-xs text-slate-400">{m.when}</p>
-                </div>
-                <Badge tone={m.tone}>{m.status}</Badge>
-              </div>
-              <div className="my-3">
-                <Route pickup={m.pickup} drop={m.drop} />
-              </div>
-              <Button variant="ghost">View Details</Button>
-            </Card>
-          </Item>
-        ))}
+        {loading ? (
+          <div className="grid place-items-center py-16 text-slate-400">
+            <Loader2 className="h-6 w-6 animate-spin" />
+          </div>
+        ) : bookings.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 pt-16 text-center text-slate-400">
+            <Inbox className="h-8 w-8" />
+            <p className="text-sm font-semibold">No moves yet</p>
+            <Link to="/customer/book" className="text-sm font-bold text-brand-600">Book your first move</Link>
+          </div>
+        ) : (
+          bookings.map((m) => (
+            <Item key={m.id}>
+              <BookingCard m={m} isActive={isActive(m.status)} />
+            </Item>
+          ))
+        )}
       </Stagger>
       <BottomNav role="customer" />
     </div>
@@ -367,12 +522,14 @@ const notifTone = {
 }
 
 export function CustomerAlerts() {
+  const { profile } = useAuth()
   return (
     <div className="flex min-h-screen flex-col">
-      <TopBar title="SmartShift" back brand />
+      <TopBar brandLeft avatar={<Avatar url={profile?.avatar_url} />} />
       <Stagger className="flex-1 space-y-5 px-5 pb-6">
-        <Item>
-          <h1 className="text-xl font-extrabold text-ink">Notifications</h1>
+        <Item className="flex items-center justify-between">
+          <h1 className="text-2xl font-extrabold text-ink">Notifications</h1>
+          <button className="text-xs font-bold text-brand-600">Mark all as read</button>
         </Item>
         {customerNotifications.map((grp) => (
           <Item key={grp.group} className="space-y-3">
@@ -382,21 +539,28 @@ export function CustomerAlerts() {
               return (
                 <Card key={i} className="p-4">
                   <div className="flex gap-3">
-                    <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl ${notifTone[n.tone]}`}>
+                    <span className={`relative grid h-9 w-9 shrink-0 place-items-center rounded-xl ${notifTone[n.tone]}`}>
                       <Icon className="h-5 w-5" />
+                      {n.accent && <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-brand-500 ring-2 ring-white" />}
                     </span>
                     <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <p className={`text-sm font-bold ${n.accent ? 'text-brand-600' : 'text-ink'}`}>{n.title}</p>
-                        {n.accent && <span className="h-2 w-2 rounded-full bg-brand-500" />}
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-sm font-bold text-ink">{n.title}</p>
+                        {n.when && <p className="shrink-0 text-[11px] text-slate-400">{n.when}</p>}
                       </div>
                       <p className="mt-0.5 text-xs text-slate-500">{n.text}</p>
+                      {n.stars && (
+                        <div className="mt-2 flex gap-1">
+                          {[...Array(5)].map((_, k) => (
+                            <Star key={k} className="h-5 w-5 text-slate-300" />
+                          ))}
+                        </div>
+                      )}
                       {n.cta && (
                         <Link to="/customer/track">
-                          <Button className="mt-3">{n.cta}</Button>
+                          <Button className="mt-3">{n.cta} <Navigation className="h-4 w-4" /></Button>
                         </Link>
                       )}
-                      {n.when && <p className="mt-1 text-[11px] text-slate-400">{n.when}</p>}
                     </div>
                   </div>
                 </Card>
@@ -413,57 +577,81 @@ export function CustomerAlerts() {
 /* ===================== Profile (customer) ===================== */
 export function CustomerProfile() {
   const nav = useNavigate()
+  const { user, profile, signOut } = useAuth()
+  const [bookings, setBookings] = useState([])
+
+  useEffect(() => {
+    if (!user) return
+    listCustomerBookings(user.id).then(setBookings).catch(() => {})
+  }, [user?.id])
+
+  const completed = bookings.filter((b) => b.status === 'delivered').length
+  const statCards = [
+    { icon: Truck, value: String(bookings.length), label: 'Total Moves' },
+    { icon: Star, value: completed ? '5.0' : '—', label: 'User Rating' },
+    { icon: Calendar, value: memberSince(user?.created_at), label: 'Member Since' },
+  ]
   const rows = [
-    { icon: CreditCard, label: 'Payment Methods' },
-    { icon: MapPin, label: 'Saved Addresses' },
-    { icon: ShieldCheck, label: 'Privacy & Security' },
-    { icon: Settings, label: 'Settings' },
+    { icon: UserPen, label: 'Edit Profile', sub: 'Update your personal details and bio', to: '/profile/edit' },
+    { icon: CreditCard, label: 'Payment Methods', sub: 'Manage cards and digital wallets' },
+    { icon: MapPin, label: 'Saved Addresses', sub: 'Default pickup and drop-off points' },
   ]
   return (
     <div className="flex min-h-screen flex-col">
-      <TopBar title="SmartShift" brand kebab />
+      <TopBar brandLeft avatar={<Avatar url={profile?.avatar_url} />} />
       <Stagger className="flex-1 space-y-4 px-5 pb-6">
         <Item className="flex flex-col items-center pt-2">
-          <img src="https://i.pravatar.cc/120?img=47" className="h-20 w-20 rounded-full object-cover ring-4 ring-white shadow" alt="" />
-          <h2 className="mt-3 text-xl font-extrabold text-ink">Amna Sheikh</h2>
+          <span className="relative">
+            <img src={profile?.avatar_url || 'https://i.pravatar.cc/120?img=47'} className="h-24 w-24 rounded-full object-cover ring-4 ring-white shadow" alt="" />
+            <span className="absolute bottom-1 right-1 grid h-6 w-6 place-items-center rounded-full bg-brand-600 text-white ring-2 ring-white">
+              <BadgeCheck className="h-3.5 w-3.5" />
+            </span>
+          </span>
+          <h2 className="mt-3 text-xl font-extrabold text-ink">{profile?.full_name || 'SmartShift User'}</h2>
           <Badge tone="brand" className="mt-1">
             <Star className="h-3 w-3" /> Premium Member
           </Badge>
         </Item>
+
+        {statCards.map((s) => (
+          <Item key={s.label}>
+            <Card className="flex flex-col items-center gap-1 p-4 text-center">
+              <s.icon className="h-5 w-5 text-brand-500" />
+              <p className="text-xl font-extrabold text-ink">{s.value}</p>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{s.label}</p>
+            </Card>
+          </Item>
+        ))}
+
         <Item>
-          <Card className="grid grid-cols-3 divide-x divide-slate-100 p-4 text-center">
-            {[
-              ['12', 'Moves'],
-              ['4.9', 'Rating'],
-              ['2 yr', 'Member'],
-            ].map(([v, l]) => (
-              <div key={l}>
-                <p className="text-lg font-extrabold text-ink">{v}</p>
-                <p className="text-[11px] text-slate-400">{l}</p>
-              </div>
-            ))}
-          </Card>
+          <h3 className="mb-1 text-base font-bold text-ink">Account Settings</h3>
         </Item>
         <Item>
           <Card className="divide-y divide-slate-100">
             {rows.map((r) => (
               <button
                 key={r.label}
-                onClick={() => r.label === 'Settings' && nav('/settings')}
+                onClick={() => r.to && nav(r.to)}
                 className="flex w-full items-center gap-3 p-4 text-left"
               >
                 <span className="grid h-9 w-9 place-items-center rounded-xl bg-brand-50 text-brand-600">
                   <r.icon className="h-4 w-4" />
                 </span>
-                <span className="flex-1 text-sm font-semibold text-ink">{r.label}</span>
+                <span className="flex-1">
+                  <span className="block text-sm font-semibold text-ink">{r.label}</span>
+                  <span className="block text-[11px] text-slate-400">{r.sub}</span>
+                </span>
                 <ChevronRight className="h-4 w-4 text-slate-300" />
               </button>
             ))}
-            <button onClick={() => { clearRole(); nav('/') }} className="flex w-full items-center gap-3 p-4 text-left text-rose-500">
-              <span className="grid h-9 w-9 place-items-center rounded-xl bg-rose-50">
+            <button onClick={async () => { await signOut(); nav('/') }} className="flex w-full items-center gap-3 p-4 text-left">
+              <span className="grid h-9 w-9 place-items-center rounded-xl bg-rose-50 text-rose-500">
                 <LogOut className="h-4 w-4" />
               </span>
-              <span className="flex-1 text-sm font-bold">Logout</span>
+              <span className="flex-1">
+                <span className="block text-sm font-bold text-rose-500">Logout</span>
+                <span className="block text-[11px] text-rose-400">Securely sign out of your account</span>
+              </span>
             </button>
           </Card>
         </Item>

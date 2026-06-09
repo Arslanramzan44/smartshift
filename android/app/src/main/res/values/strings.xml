@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">SmartShift</string>
+    <string name="title_activity_main">SmartShift</string>
+    <string name="package_name">com.smartshift.app</string>
+    <string name="custom_url_scheme">com.smartshift.app</string>
+</resources>

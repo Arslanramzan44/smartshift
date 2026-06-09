@@ -1,8 +1,11 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Routes, Route, useLocation, Link, Navigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
+import { Capacitor } from '@capacitor/core'
 import { LayoutGrid, X } from 'lucide-react'
-import { Onboarding, Register, RoleSelect, Login, ForgotPassword } from './screens/Auth'
+import { Onboarding, Register, RoleSelect, Login, ForgotPassword, ResetPassword } from './screens/Auth'
+import EditProfile from './screens/EditProfile'
+import { useAuth } from './lib/AuthContext'
 import {
   CustomerDashboard,
   CustomerTrack,
@@ -11,14 +14,16 @@ import {
   CustomerProfile,
   CustomerAlerts,
 } from './screens/Customer'
-import { getRole } from './lib/auth'
+import { getRole, homeFor } from './lib/auth'
 import { BookWizard } from './screens/Book'
 import { SettingsScreen } from './screens/Settings'
 import {
   MoverDashboard,
   MoverAvailable,
+  MoverJobs,
   MoverJobDetail,
   MoverScan,
+  MoverConfirmDelivery,
   MoverProfile,
   MoverEarnings,
   MoverDocuments,
@@ -31,6 +36,8 @@ const SCREENS = [
   ['Role Select', '/role'],
   ['Login', '/login'],
   ['Forgot Password', '/forgot'],
+  ['Reset Password', '/reset'],
+  ['Edit Profile', '/profile/edit'],
   ['Customer · Home', '/customer'],
   ['Customer · Book', '/customer/book'],
   ['Customer · Moves', '/customer/moves'],
@@ -42,8 +49,6 @@ const SCREENS = [
   ['Mover · Home', '/mover'],
   ['Mover · Available', '/mover/available'],
   ['Mover · My Jobs', '/mover/jobs'],
-  ['Mover · Job Detail', '/mover/job/8492-AX'],
-  ['Mover · QR Scan', '/mover/scan'],
   ['Mover · Profile', '/mover/profile'],
   ['Mover · Earnings', '/mover/earnings'],
   ['Mover · Documents', '/mover/documents'],
@@ -64,13 +69,36 @@ function Page({ children }) {
   )
 }
 
-// Gate role-specific screens. Wrong/no role redirects so a customer
-// never lands on mover data and vice-versa.
+// Gate role-specific screens. Requires an authenticated session and the
+// matching role, so a customer never lands on mover data and vice-versa.
 function RoleGuard({ role, children }) {
-  const current = getRole()
+  const { user, profile, loading } = useAuth()
+  if (loading) return null
+  if (!user) return <Navigate to="/login" replace />
+  const current = profile?.role || getRole()
   if (!current) return <Navigate to="/role" replace />
   if (current !== role) return <Navigate to={current === 'mover' ? '/mover' : '/customer'} replace />
   return children
+}
+
+// Any authenticated user (role-agnostic), e.g. edit profile.
+function AuthGuard({ children }) {
+  const { user, loading } = useAuth()
+  if (loading) return null
+  if (!user) return <Navigate to="/login" replace />
+  return children
+}
+
+// Root route. A logged-in user skips onboarding and goes straight to their
+// home; only logged-out users see the onboarding carousel.
+function RootGate() {
+  const { user, profile, loading } = useAuth()
+  if (loading) return null
+  if (user) {
+    const role = profile?.role || getRole() || 'customer'
+    return <Navigate to={homeFor(role)} replace />
+  }
+  return <Page><Onboarding /></Page>
 }
 
 function AnimatedRoutes() {
@@ -78,11 +106,13 @@ function AnimatedRoutes() {
   return (
     <AnimatePresence mode="wait">
       <Routes location={location} key={location.pathname}>
-        <Route path="/" element={<Page><Onboarding /></Page>} />
+        <Route path="/" element={<RootGate />} />
         <Route path="/register" element={<Page><Register /></Page>} />
         <Route path="/role" element={<Page><RoleSelect /></Page>} />
         <Route path="/login" element={<Page><Login /></Page>} />
         <Route path="/forgot" element={<Page><ForgotPassword /></Page>} />
+        <Route path="/reset" element={<Page><ResetPassword /></Page>} />
+        <Route path="/profile/edit" element={<AuthGuard><Page><EditProfile /></Page></AuthGuard>} />
 
         <Route path="/customer" element={<RoleGuard role="customer"><Page><CustomerDashboard /></Page></RoleGuard>} />
         <Route path="/customer/book" element={<RoleGuard role="customer"><Page><BookWizard /></Page></RoleGuard>} />
@@ -95,9 +125,10 @@ function AnimatedRoutes() {
 
         <Route path="/mover" element={<RoleGuard role="mover"><Page><MoverDashboard /></Page></RoleGuard>} />
         <Route path="/mover/available" element={<RoleGuard role="mover"><Page><MoverAvailable /></Page></RoleGuard>} />
-        <Route path="/mover/jobs" element={<RoleGuard role="mover"><Page><MoverJobDetail /></Page></RoleGuard>} />
+        <Route path="/mover/jobs" element={<RoleGuard role="mover"><Page><MoverJobs /></Page></RoleGuard>} />
         <Route path="/mover/job/:id" element={<RoleGuard role="mover"><Page><MoverJobDetail /></Page></RoleGuard>} />
-        <Route path="/mover/scan" element={<RoleGuard role="mover"><Page><MoverScan /></Page></RoleGuard>} />
+        <Route path="/mover/scan/:id" element={<RoleGuard role="mover"><Page><MoverScan /></Page></RoleGuard>} />
+        <Route path="/mover/confirm/:id" element={<RoleGuard role="mover"><Page><MoverConfirmDelivery /></Page></RoleGuard>} />
         <Route path="/mover/profile" element={<RoleGuard role="mover"><Page><MoverProfile /></Page></RoleGuard>} />
         <Route path="/mover/earnings" element={<RoleGuard role="mover"><Page><MoverEarnings /></Page></RoleGuard>} />
         <Route path="/mover/documents" element={<RoleGuard role="mover"><Page><MoverDocuments /></Page></RoleGuard>} />
@@ -167,6 +198,19 @@ function ScreenLauncher() {
 }
 
 export default function App() {
+  // Android hardware back button: navigate back, or exit at the root.
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return
+    let handle
+    import('@capacitor/app').then(({ App: CapApp }) => {
+      CapApp.addListener('backButton', ({ canGoBack }) => {
+        if (canGoBack) window.history.back()
+        else CapApp.exitApp()
+      }).then((h) => (handle = h))
+    })
+    return () => handle?.remove()
+  }, [])
+
   return (
     <div className="mx-auto min-h-screen w-full max-w-md bg-slate-50 shadow-sm sm:max-w-lg">
       <AnimatedRoutes />

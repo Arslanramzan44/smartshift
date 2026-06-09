@@ -14,9 +14,51 @@ import {
 } from 'lucide-react'
 import { Logo } from './ui'
 
-/* ---------- Top bar ---------- */
-export function TopBar({ title, back, brand = false, menu = false, kebab = false, left, right, dark = false }) {
+/* ---------- Top bar ----------
+   Two layouts:
+   - default: centered title / brand logo (used on auth + form screens)
+   - brandLeft: app bar with menu (or back) on the left, the SmartShift
+     wordmark left-aligned, and an avatar/right slot on the far right
+     (used on the logged-in dashboard-style screens).                     */
+export function TopBar({
+  title,
+  back,
+  brand = false,
+  brandLeft = false,
+  menu = false,
+  kebab = false,
+  left,
+  right,
+  avatar,
+  dark = false,
+}) {
   const nav = useNavigate()
+  const bg = dark ? 'bg-transparent' : 'bg-slate-50/90 backdrop-blur'
+
+  if (brandLeft) {
+    return (
+      <div className={`sticky top-0 z-40 flex items-center gap-2 px-4 pb-3 pt-9 ${bg}`}>
+        {back ? (
+          <motion.button
+            whileTap={{ scale: 0.9 }}
+            onClick={() => nav(-1)}
+            className={`grid h-9 w-9 place-items-center rounded-full ${dark ? 'bg-white/10 text-white' : 'bg-white text-ink shadow-sm ring-1 ring-slate-100'}`}
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </motion.button>
+        ) : (
+          <button className={`grid h-9 w-9 place-items-center rounded-full ${dark ? 'text-white' : 'text-slate-700'}`}>
+            <Menu className="h-5 w-5" />
+          </button>
+        )}
+        <Logo plain light={dark} />
+        <div className="flex-1" />
+        {right}
+        {avatar}
+      </div>
+    )
+  }
+
   return (
     <div className={`sticky top-0 z-40 flex items-center gap-2 px-4 pb-3 pt-9 ${dark ? 'bg-slate-50' : 'bg-slate-50/90 backdrop-blur'}`}>
       {left}
@@ -95,12 +137,12 @@ export function BottomNav({ role = 'customer' }) {
                 <Link key={t.to} to={t.to} className="relative flex flex-1 flex-col items-center gap-1 py-1">
                   <span
                     className={`grid h-9 w-12 place-items-center rounded-xl transition ${
-                      active ? 'bg-brand-600 text-white shadow-md shadow-brand-600/30' : 'text-slate-400'
+                      active ? 'bg-brand-100 text-brand-600' : 'text-slate-400'
                     }`}
                   >
-                    <Icon className="h-5 w-5" strokeWidth={active ? 2.4 : 2} />
+                    <Icon className="h-5 w-5" strokeWidth={active ? 2.6 : 2} />
                   </span>
-                  <span className={`text-[10px] font-semibold ${active ? 'text-brand-700' : 'text-slate-400'}`}>
+                  <span className={`text-[10px] font-semibold ${active ? 'text-brand-600' : 'text-slate-400'}`}>
                     {t.label}
                   </span>
                 </Link>
