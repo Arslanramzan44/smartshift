@@ -49,6 +49,12 @@ drop policy if exists "profiles_select_own" on public.profiles;
 create policy "profiles_select_own" on public.profiles
   for select to authenticated using (id = auth.uid());
 
+-- mover profiles are visible to any authenticated user, so a customer can
+-- see the name/avatar/phone of the mover assigned to their booking.
+drop policy if exists "profiles_select_movers" on public.profiles;
+create policy "profiles_select_movers" on public.profiles
+  for select to authenticated using (role = 'mover');
+
 drop policy if exists "profiles_insert_own" on public.profiles;
 create policy "profiles_insert_own" on public.profiles
   for insert to authenticated with check (id = auth.uid());
