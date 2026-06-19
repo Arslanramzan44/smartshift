@@ -24,11 +24,13 @@ import {
   Info,
   Warehouse,
   Boxes,
+  Banknote,
+  Route,
 } from 'lucide-react'
 import { Button, Card, Field, money } from '../components/ui'
 import { RouteMap, PlacesField } from '../components/maps'
 import { TopBar } from '../components/nav'
-import { vehicles, services, bookingItems } from '../lib/data'
+import { vehicles, services, bookingItems, distanceFee } from '../lib/data'
 import { STORAGE_UNITS, STORAGE_DURATIONS, WAREHOUSES, storagePrice, createStorageBooking } from '../lib/storage'
 import { useAuth } from '../lib/AuthContext'
 import { createBooking } from '../lib/bookings'
@@ -79,6 +81,7 @@ export function BookWizard() {
   const [dropoff, setDropoff] = useState('')
   const [scheduleLabel, setScheduleLabel] = useState('Now')
   const [routeInfo, setRouteInfo] = useState(null)
+  const [payMethod, setPayMethod] = useState('cod')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
@@ -86,11 +89,13 @@ export function BookWizard() {
 
   const vehicleObj = vehicles.find((v) => v.id === vehicle)
   const vehiclePrice = vehicleObj.price
+  const distanceKm = routeInfo?.km || 0
+  const distanceTotal = distanceFee(vehicleObj, distanceKm)
   const extrasTotal = services.filter((s) => extras.includes(s.id)).reduce((a, s) => a + s.price, 0)
   const storageDur = STORAGE_DURATIONS.find((d) => d.id === storage.duration)
   const storageTotal = storage.on ? storagePrice(storage.unit, storageDur.days) : 0
   const addOnsTotal = extrasTotal + storageTotal
-  const total = vehiclePrice + addOnsTotal
+  const total = vehiclePrice + distanceTotal + addOnsTotal
 
   async function submitBooking() {
     setErr('')
@@ -109,7 +114,9 @@ export function BookWizard() {
           dropoff_address: dropoff.trim(),
           vehicle: vehicleObj.name,
           schedule_label: scheduleLabel,
+          distance_km: distanceKm ? Math.round(distanceKm * 10) / 10 : null,
           price: total,
+          payment_method: payMethod,
           customer_name: profile?.full_name || null,
           customer_phone: profile?.phone || null,
         },
@@ -156,7 +163,8 @@ export function BookWizard() {
     exit: (d) => ({ x: d > 0 ? -60 : 60, opacity: 0 }),
   }
 
-  const nextLabel = ['Next Step', 'Continue', 'Review Summary', 'Confirm & Pay', `Pay ${money(total)}`][step]
+  const payLabel = payMethod === 'cod' ? `Place Order · ${money(total)}` : `Pay ${money(total)}`
+  const nextLabel = ['Next Step', 'Continue', 'Review Summary', 'Confirm & Pay', payLabel][step]
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -198,6 +206,8 @@ export function BookWizard() {
                 extras={extras}
                 toggleExtra={toggleExtra}
                 vehiclePrice={vehiclePrice}
+                distanceKm={distanceKm}
+                distanceTotal={distanceTotal}
                 extrasTotal={extrasTotal}
                 storage={storage}
                 setStorage={setStorage}
@@ -205,8 +215,8 @@ export function BookWizard() {
               />
             )}
             {step === 2 && <StepItems items={items} setItems={setItems} />}
-            {step === 3 && <StepSummary vehicle={vehicle} items={items} pickup={pickup} dropoff={dropoff} scheduleLabel={scheduleLabel} total={total} storage={storage} storageDur={storageDur} storageTotal={storageTotal} />}
-            {step === 4 && <StepPayment vehiclePrice={vehiclePrice} addOnsTotal={addOnsTotal} total={total} pickup={pickup} dropoff={dropoff} />}
+            {step === 3 && <StepSummary vehicle={vehicle} items={items} pickup={pickup} dropoff={dropoff} scheduleLabel={scheduleLabel} total={total} distanceKm={distanceKm} distanceTotal={distanceTotal} storage={storage} storageDur={storageDur} storageTotal={storageTotal} />}
+            {step === 4 && <StepPayment vehiclePrice={vehiclePrice} distanceKm={distanceKm} distanceTotal={distanceTotal} addOnsTotal={addOnsTotal} total={total} pickup={pickup} dropoff={dropoff} payMethod={payMethod} setPayMethod={setPayMethod} />}
           </motion.div>
         </AnimatePresence>
       </div>
@@ -283,7 +293,8 @@ function StepLocations({ pickup, setPickup, dropoff, setDropoff, scheduleLabel, 
 }
 
 /* ---------- Step 2: Vehicle & Services ---------- */
-function StepVehicle({ vehicle, setVehicle, extras, toggleExtra, vehiclePrice, extrasTotal, storage, setStorage, storageTotal }) {
+function StepVehicle({ vehicle, setVehicle, extras, toggleExtra, vehiclePrice, distanceKm, distanceTotal, extrasTotal, storage, setStorage, storageTotal }) {
+  const vObj = vehicles.find((v) => v.id === vehicle)
   return (
     <>
       <div>
@@ -401,6 +412,14 @@ function StepVehicle({ vehicle, setVehicle, extras, toggleExtra, vehiclePrice, e
           <span>{money(vehiclePrice)}</span>
         </div>
         <div className="flex justify-between text-sm text-slate-600">
+          <span className="flex items-center gap-1">
+            <Route className="h-3.5 w-3.5 text-brand-500" />
+            Distance
+            {distanceKm ? ` (${distanceKm.toFixed(1)} km × ${money(vObj.perKm)})` : ''}
+          </span>
+          <span>{distanceKm ? money(distanceTotal) : 'Set route'}</span>
+        </div>
+        <div className="flex justify-between text-sm text-slate-600">
           <span>Additional Services</span>
           <span>{money(extrasTotal)}</span>
         </div>
@@ -412,7 +431,7 @@ function StepVehicle({ vehicle, setVehicle, extras, toggleExtra, vehiclePrice, e
         )}
         <div className="flex justify-between border-t border-brand-100 pt-2 text-base font-extrabold text-brand-700">
           <span className="text-ink">Estimated Total</span>
-          <span>{money(vehiclePrice + extrasTotal + storageTotal)}</span>
+          <span>{money(vehiclePrice + distanceTotal + extrasTotal + storageTotal)}</span>
         </div>
       </Card>
     </>
@@ -637,9 +656,9 @@ function StepItems({ items, setItems }) {
 }
 
 /* ---------- Step 4: Summary ---------- */
-function StepSummary({ vehicle, items, pickup, dropoff, scheduleLabel, total, storage, storageDur, storageTotal }) {
+function StepSummary({ vehicle, items, pickup, dropoff, scheduleLabel, total, distanceKm, distanceTotal, storage, storageDur, storageTotal }) {
   const v = vehicles.find((x) => x.id === vehicle)
-  const servicesOnly = total - v.price - (storage.on ? storageTotal : 0)
+  const servicesOnly = total - v.price - distanceTotal - (storage.on ? storageTotal : 0)
   return (
     <>
       <h2 className="text-xl font-extrabold text-ink">Review Your Booking</h2>
@@ -667,6 +686,10 @@ function StepSummary({ vehicle, items, pickup, dropoff, scheduleLabel, total, st
         <div className="flex justify-between text-sm text-slate-600">
           <span>Vehicle ({v.name})</span>
           <span>{money(v.price)}</span>
+        </div>
+        <div className="mt-1 flex justify-between text-sm text-slate-600">
+          <span>Distance{distanceKm ? ` (${distanceKm.toFixed(1)} km)` : ''}</span>
+          <span>{money(distanceTotal)}</span>
         </div>
         <div className="mt-1 flex justify-between text-sm text-slate-600">
           <span>Additional Services</span>
@@ -699,49 +722,90 @@ function Info2({ icon: Icon, label, value }) {
 }
 
 /* ---------- Step 5: Payment / Checkout ---------- */
-function StepPayment({ vehiclePrice, addOnsTotal, total, pickup, dropoff }) {
+function StepPayment({ vehiclePrice, distanceKm, distanceTotal, addOnsTotal, total, pickup, dropoff, payMethod, setPayMethod }) {
   const [save, setSave] = useState(false)
+  const cod = payMethod === 'cod'
   return (
     <>
       <div>
         <h2 className="text-2xl font-extrabold text-ink">Complete Booking</h2>
-        <p className="text-sm text-slate-500">Your move is scheduled. Enter your payment to confirm the shift.</p>
+        <p className="text-sm text-slate-500">
+          {cod ? 'Pay the mover in cash when your items are delivered.' : 'Your move is scheduled. Enter your payment to confirm the shift.'}
+        </p>
       </div>
 
-      <Card className="space-y-3 p-4">
-        <div className="flex items-center justify-between">
-          <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-400">
-            <CreditCard className="h-4 w-4" /> Credit or Debit Card
-          </span>
-          <span className="flex gap-1">
-            <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold text-slate-500">VISA</span>
-            <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold text-slate-500">MC</span>
-          </span>
-        </div>
-        <Field label="Cardholder Name" placeholder="John Doe" />
-        <Field label="Card Number" trailing={<Lock className="h-4 w-4" />} placeholder="0000 0000 0000 0000" />
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Expiry Date" placeholder="MM/YY" />
-          <Field label="CVV" placeholder="•••" />
-        </div>
-        <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
-          <button
-            type="button"
-            onClick={() => setSave(!save)}
-            className={`grid h-5 w-5 place-items-center rounded-md border-2 transition ${save ? 'border-brand-600 bg-brand-600' : 'border-slate-300'}`}
-          >
-            {save && <Check className="h-3 w-3 text-white" />}
-          </button>
-          Save card details for future moves
-        </label>
-      </Card>
-
-      <div className="flex items-center justify-between px-1">
-        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600">
-          <ShieldCheck className="h-3.5 w-3.5" /> Secure SSL Encryption
-        </span>
-        <span className="text-[11px] text-slate-400">Powered by <span className="font-bold text-indigo-500">stripe</span></span>
+      {/* payment method selector */}
+      <div className="grid grid-cols-2 gap-3">
+        <button
+          type="button"
+          onClick={() => setPayMethod('cod')}
+          className={`rounded-2xl border-2 p-4 text-left transition ${cod ? 'border-brand-600 bg-brand-50 shadow-[var(--shadow-card)]' : 'border-slate-100 bg-white'}`}
+        >
+          <Banknote className={`h-6 w-6 ${cod ? 'text-brand-600' : 'text-slate-400'}`} />
+          <p className="mt-2 text-sm font-bold text-ink">Cash on Delivery</p>
+          <p className="text-[11px] text-slate-400">Pay when delivered</p>
+        </button>
+        <button
+          type="button"
+          onClick={() => setPayMethod('card')}
+          className={`rounded-2xl border-2 p-4 text-left transition ${!cod ? 'border-brand-600 bg-brand-50 shadow-[var(--shadow-card)]' : 'border-slate-100 bg-white'}`}
+        >
+          <CreditCard className={`h-6 w-6 ${!cod ? 'text-brand-600' : 'text-slate-400'}`} />
+          <p className="mt-2 text-sm font-bold text-ink">Card</p>
+          <p className="text-[11px] text-slate-400">Pay now online</p>
+        </button>
       </div>
+
+      {cod ? (
+        <Card className="flex items-start gap-3 p-4">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600">
+            <Banknote className="h-5 w-5" />
+          </span>
+          <div>
+            <p className="text-sm font-bold text-ink">Pay {money(total)} on delivery</p>
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              Hand the cash to your mover after your items arrive and you confirm delivery. No advance payment needed.
+            </p>
+          </div>
+        </Card>
+      ) : (
+        <>
+          <Card className="space-y-3 p-4">
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-400">
+                <CreditCard className="h-4 w-4" /> Credit or Debit Card
+              </span>
+              <span className="flex gap-1">
+                <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold text-slate-500">VISA</span>
+                <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold text-slate-500">MC</span>
+              </span>
+            </div>
+            <Field label="Cardholder Name" placeholder="John Doe" />
+            <Field label="Card Number" trailing={<Lock className="h-4 w-4" />} placeholder="0000 0000 0000 0000" />
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Expiry Date" placeholder="MM/YY" />
+              <Field label="CVV" placeholder="•••" />
+            </div>
+            <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+              <button
+                type="button"
+                onClick={() => setSave(!save)}
+                className={`grid h-5 w-5 place-items-center rounded-md border-2 transition ${save ? 'border-brand-600 bg-brand-600' : 'border-slate-300'}`}
+              >
+                {save && <Check className="h-3 w-3 text-white" />}
+              </button>
+              Save card details for future moves
+            </label>
+          </Card>
+
+          <div className="flex items-center justify-between px-1">
+            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600">
+              <ShieldCheck className="h-3.5 w-3.5" /> Secure SSL Encryption
+            </span>
+            <span className="text-[11px] text-slate-400">Powered by <span className="font-bold text-indigo-500">stripe</span></span>
+          </div>
+        </>
+      )}
 
       <Card className="p-4">
         <p className="mb-3 text-base font-bold text-ink">Move Summary</p>
@@ -750,11 +814,15 @@ function StepPayment({ vehiclePrice, addOnsTotal, total, pickup, dropoff }) {
           <span className="font-semibold text-ink">{money(vehiclePrice)}</span>
         </div>
         <div className="mt-2 flex justify-between text-sm text-slate-600">
+          <span>Distance Fee{distanceKm ? ` (${distanceKm.toFixed(1)} km)` : ''}</span>
+          <span className="font-semibold text-ink">{money(distanceTotal)}</span>
+        </div>
+        <div className="mt-2 flex justify-between text-sm text-slate-600">
           <span>Add-ons & Services</span>
           <span className="font-semibold text-ink">{money(addOnsTotal)}</span>
         </div>
         <div className="mt-3 flex justify-between border-t border-slate-100 pt-3 text-base font-extrabold">
-          <span className="text-ink">Total Amount</span>
+          <span className="text-ink">{cod ? 'Payable on Delivery' : 'Total Amount'}</span>
           <span className="text-brand-700">{money(total)}</span>
         </div>
       </Card>
@@ -766,10 +834,12 @@ function StepPayment({ vehiclePrice, addOnsTotal, total, pickup, dropoff }) {
         <MapPin className="h-3.5 w-3.5 text-brand-500" /> {pickup || 'Pickup'} → {dropoff || 'Drop-off'}
       </p>
 
-      <div className="flex gap-2 rounded-xl bg-brand-50 p-3 text-[11px] text-brand-700">
-        <Info className="mt-0.5 h-4 w-4 shrink-0" />
-        <span>A temporary authorization hold of {money(500)} will be applied to verify your card validity.</span>
-      </div>
+      {!cod && (
+        <div className="flex gap-2 rounded-xl bg-brand-50 p-3 text-[11px] text-brand-700">
+          <Info className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>A temporary authorization hold of {money(500)} will be applied to verify your card validity.</span>
+        </div>
+      )}
     </>
   )
 }

@@ -78,7 +78,13 @@ export function RouteMap({ pickup, dropoff, className = '', dark = false, onInfo
         if (status === 'OK' && res) {
           rendererRef.current.setDirections(res)
           const leg = res.routes[0]?.legs[0]
-          if (leg && onInfo) onInfo({ distance: leg.distance?.text, duration: leg.duration?.text })
+          if (leg && onInfo)
+            onInfo({
+              distance: leg.distance?.text,
+              duration: leg.duration?.text,
+              // numeric km (meters / 1000) used for distance-based pricing
+              km: leg.distance?.value ? leg.distance.value / 1000 : null,
+            })
         }
       },
     )

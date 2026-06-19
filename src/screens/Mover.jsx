@@ -57,6 +57,7 @@ import {
 } from '../lib/bookings'
 import { Html5Qrcode } from 'html5-qrcode'
 import { Capacitor } from '@capacitor/core'
+import { CapacitorBarcodeScanner, CapacitorBarcodeScannerTypeHint } from '@capacitor/barcode-scanner'
 
 const Avatar = ({ url }) => (
   <span className="grid h-9 w-9 place-items-center overflow-hidden rounded-full bg-slate-200 text-slate-500">
@@ -796,10 +797,75 @@ export function MoverConfirmDelivery() {
   const nav = useNavigate()
   const [phase, setPhase] = useState('scanning') // scanning | confirming | done | error
   const [msg, setMsg] = useState('')
+  const [tries, setTries] = useState(0)
   const okRef = useRef(false)
+
+  const retry = () => {
+    okRef.current = false
+    setMsg('')
+    setPhase('scanning')
+    setTries((t) => t + 1) // re-runs the scan effect
+  }
 
   useEffect(() => {
     let alive = true
+
+    // Validate the scanned text against this delivery, then mark it delivered.
+    // Returns true once a matching code has been handled.
+    const finish = async (text) => {
+      if (okRef.current || !alive) return false
+      if (!matchesDelivery(text, id)) {
+        setMsg('This QR does not match the delivery.')
+        return false
+      }
+      okRef.current = true
+      setPhase('confirming')
+      try {
+        await setStatus(id, 'delivered')
+        if (!alive) return true
+        setPhase('done')
+        setTimeout(() => nav(`/mover/job/${id}`), 1400)
+      } catch {
+        if (alive) {
+          setPhase('error')
+          setMsg('Could not confirm delivery. Please try again.')
+        }
+      }
+      return true
+    }
+
+    // ---- Native (Android/iOS): use the OS barcode scanner. getUserMedia in the
+    // Capacitor WebView opens the camera but never delivers frames, so html5-qrcode
+    // never fires — the native plugin runs a real MLKit/AVFoundation scanner. ----
+    if (Capacitor.isNativePlatform()) {
+      ;(async () => {
+        try {
+          const res = await CapacitorBarcodeScanner.scanBarcode({
+            hint: CapacitorBarcodeScannerTypeHint.QR_CODE,
+            scanInstructions: "Scan the customer's delivery QR",
+          })
+          if (!alive) return
+          const text = res?.ScanResult || ''
+          if (!text) {
+            setPhase('error')
+            setMsg('No QR detected. Please retry.')
+            return
+          }
+          const ok = await finish(text)
+          if (!ok && alive) setPhase('error') // wrong QR — msg already set
+        } catch {
+          if (alive) {
+            setPhase('error')
+            setMsg('Scan cancelled or camera unavailable. Retry to scan again.')
+          }
+        }
+      })()
+      return () => {
+        alive = false
+      }
+    }
+
+    // ---- Web (browser / dev): fall back to html5-qrcode in the on-page reader. ----
     let stopped = false
     const qr = new Html5Qrcode('pod-reader')
     const stop = async () => {
@@ -818,35 +884,12 @@ export function MoverConfirmDelivery() {
     }
 
     const onScan = async (text) => {
-      if (okRef.current || !alive) return
-      if (!matchesDelivery(text, id)) {
-        setMsg('This QR does not match the delivery.')
-        return
-      }
-      okRef.current = true
-      setPhase('confirming')
-      await stop()
-      try {
-        await setStatus(id, 'delivered')
-        setPhase('done')
-        setTimeout(() => nav(`/mover/job/${id}`), 1400)
-      } catch {
-        setPhase('error')
-        setMsg('Could not confirm delivery. Please try again.')
-      }
+      const ok = await finish(text)
+      if (ok) await stop()
     }
 
     ;(async () => {
       try {
-        // On a native build, grant the OS camera permission before getUserMedia.
-        if (Capacitor.isNativePlatform()) {
-          try {
-            const { Camera } = await import('@capacitor/camera')
-            await Camera.requestPermissions({ permissions: ['camera'] })
-          } catch {
-            // fall through; web getUserMedia may still prompt
-          }
-        }
         await qr.start({ facingMode: 'environment' }, { fps: 10, qrbox: 240 }, onScan, () => {})
         if (!alive) await stop() // unmounted (e.g. StrictMode) during async start
       } catch {
@@ -861,7 +904,7 @@ export function MoverConfirmDelivery() {
       alive = false
       stop()
     }
-  }, [id, nav])
+  }, [id, nav, tries])
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-900 text-white">
@@ -902,8 +945,22 @@ export function MoverConfirmDelivery() {
               <AlertCircle className="h-8 w-8" />
             </span>
             <p className="mt-4 text-sm font-semibold">{msg}</p>
-            <button onClick={() => nav(`/mover/job/${id}`)} className="mt-5 rounded-xl bg-white/10 px-5 py-2.5 text-sm font-bold">
-              Back to Job
+            <div className="mt-5 flex gap-3">
+              <button onClick={retry} className="rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-bold">
+                Scan Again
+              </button>
+              <button onClick={() => nav(`/mover/job/${id}`)} className="rounded-xl bg-white/10 px-5 py-2.5 text-sm font-bold">
+                Back to Job
+              </button>
+            </div>
+          </div>
+        ) : Capacitor.isNativePlatform() ? (
+          // Native scanner runs in its own full-screen UI; show a placeholder behind it.
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 text-white/70">
+            <Loader2 className="h-8 w-8 animate-spin" />
+            <p className="text-sm font-semibold">Opening camera…</p>
+            <button onClick={retry} className="mt-3 rounded-xl bg-white/10 px-5 py-2.5 text-sm font-bold text-white">
+              Scan Again
             </button>
           </div>
         ) : (

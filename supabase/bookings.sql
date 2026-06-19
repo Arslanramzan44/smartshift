@@ -19,6 +19,8 @@ create table if not exists public.bookings (
   scheduled_at    timestamptz,
   distance_km     numeric,
   price           numeric not null default 0,
+  payment_method  text not null default 'cod'
+                    check (payment_method in ('cod','card')),
   notes           text,
   -- denormalized so a mover can see customer contact without reading profiles
   customer_name   text,
@@ -28,6 +30,14 @@ create table if not exists public.bookings (
   accepted_at     timestamptz,
   completed_at    timestamptz
 );
+
+-- add payment_method to pre-existing tables (no-op on fresh installs)
+alter table public.bookings
+  add column if not exists payment_method text not null default 'cod';
+do $$ begin
+  alter table public.bookings
+    add constraint bookings_payment_method_check check (payment_method in ('cod','card'));
+exception when duplicate_object then null; end $$;
 
 create index if not exists bookings_status_idx on public.bookings (status);
 create index if not exists bookings_mover_idx  on public.bookings (mover_id);
