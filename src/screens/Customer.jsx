@@ -22,6 +22,7 @@ import {
   Banknote,
   UserPen,
   Loader2,
+  AlertCircle,
   Inbox,
   User,
   Warehouse,
@@ -33,7 +34,7 @@ import { RouteMap } from '../components/maps'
 import { TopBar, BottomNav } from '../components/nav'
 import { ratingTags, tipOptions, customerNotifications } from '../lib/data'
 import { useAuth } from '../lib/AuthContext'
-import { listCustomerBookings, getBooking, STATUS_LABEL, STATUS_FLOW, statusTone, deliveryPayload } from '../lib/bookings'
+import { listCustomerBookings, getBooking, STATUS_LABEL, STATUS_FLOW, statusTone, deliveryPayload, createReview, getReviewForBooking } from '../lib/bookings'
 import { getProfile } from '../lib/db'
 import { QRCodeSVG } from 'qrcode.react'
 import { ShieldCheck } from 'lucide-react'
@@ -425,15 +426,57 @@ export function CustomerRating() {
   const [stars, setStars] = useState(0)
   const [tags, setTags] = useState([])
   const [tip, setTip] = useState(null)
+  const [comment, setComment] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const [existing, setExisting] = useState(null) // already-submitted review, if any
   const nav = useNavigate()
   const { state } = useLocation()
+  const { user } = useAuth()
   const [booking, setBooking] = useState(null)
 
   useEffect(() => {
-    if (state?.bookingId) getBooking(state.bookingId).then(setBooking).catch(() => {})
+    if (!state?.bookingId) return
+    getBooking(state.bookingId).then(setBooking).catch(() => {})
+    getReviewForBooking(state.bookingId)
+      .then((r) => {
+        if (!r) return
+        setExisting(r)
+        setStars(r.rating)
+        setTags(r.tags || [])
+        setTip(r.tip || null)
+        setComment(r.comment || '')
+      })
+      .catch(() => {})
   }, [state?.bookingId])
 
   const toggle = (t) => setTags((p) => (p.includes(t) ? p.filter((x) => x !== t) : [...p, t]))
+
+  async function submit() {
+    setErr('')
+    if (existing) return nav('/customer')
+    if (!booking) return setErr('Booking not found.')
+    if (booking.status !== 'delivered') return setErr('You can rate only after delivery.')
+    if (stars < 1) return setErr('Please select a star rating.')
+    setBusy(true)
+    try {
+      await createReview({
+        booking_id: booking.id,
+        customer_id: user.id,
+        mover_id: booking.mover_id || null,
+        rating: stars,
+        tags,
+        comment: comment.trim() || null,
+        tip: tip || 0,
+      })
+      nav('/customer')
+    } catch (e) {
+      // unique violation → already rated from another device/tab
+      setErr(e?.code === '23505' ? 'You have already rated this move.' : e.message || 'Could not submit review.')
+    } finally {
+      setBusy(false)
+    }
+  }
   return (
     <div className="flex min-h-screen flex-col">
       <TopBar
@@ -479,7 +522,7 @@ export function CustomerRating() {
             <p className="mt-5 text-center text-sm font-bold text-ink">Rate your experience</p>
             <div className="mt-3 flex justify-center gap-2">
               {[1, 2, 3, 4, 5].map((n) => (
-                <motion.button key={n} whileTap={{ scale: 1.3 }} onClick={() => setStars(n)}>
+                <motion.button key={n} whileTap={{ scale: 1.3 }} disabled={!!existing || busy} onClick={() => setStars(n)}>
                   <Star
                     className={`h-9 w-9 transition ${
                       n <= stars ? 'fill-amber-400 text-amber-400' : 'text-slate-300'
@@ -495,6 +538,7 @@ export function CustomerRating() {
                 <button
                   key={t}
                   onClick={() => toggle(t)}
+                  disabled={!!existing || busy}
                   className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
                     tags.includes(t)
                       ? 'border-brand-600 bg-brand-50 text-brand-700'
@@ -509,8 +553,11 @@ export function CustomerRating() {
             <p className="mb-1.5 mt-5 text-sm font-bold text-ink">Write a review (optional)</p>
             <textarea
               rows={3}
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              disabled={!!existing || busy}
               placeholder="How was the move? Ahmad was…"
-              className="w-full rounded-xl border border-slate-200 bg-white p-3 text-base outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100 sm:text-sm"
+              className="w-full rounded-xl border border-slate-200 bg-white p-3 text-base outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100 disabled:bg-slate-50 sm:text-sm"
             />
 
             <p className="mb-2 mt-5 flex items-center gap-2 text-sm font-bold text-ink">
@@ -520,7 +567,8 @@ export function CustomerRating() {
               {tipOptions.map((t) => (
                 <button
                   key={t}
-                  onClick={() => setTip(t)}
+                  onClick={() => setTip(tip === t ? null : t)}
+                  disabled={!!existing || busy}
                   className={`flex-1 rounded-xl border py-2.5 text-xs font-bold transition ${
                     tip === t ? 'border-brand-600 bg-brand-50 text-brand-700' : 'border-slate-200 text-slate-600'
                   }`}
@@ -528,15 +576,37 @@ export function CustomerRating() {
                   {money(t)}
                 </button>
               ))}
-              <button className="flex-1 rounded-xl border border-slate-200 py-2.5 text-xs font-bold text-slate-600">
-                Other
+              <button
+                onClick={() => setTip(null)}
+                disabled={!!existing || busy}
+                className={`flex-1 rounded-xl border py-2.5 text-xs font-bold transition ${
+                  tip == null ? 'border-brand-600 bg-brand-50 text-brand-700' : 'border-slate-200 text-slate-600'
+                }`}
+              >
+                No tip
               </button>
             </div>
           </Card>
         </Item>
 
+        {existing && (
+          <Item>
+            <div className="flex items-center gap-2 rounded-xl bg-emerald-50 p-3 text-xs font-semibold text-emerald-700">
+              <CheckCircle2 className="h-4 w-4 shrink-0" /> You already rated this move. Thanks for your feedback!
+            </div>
+          </Item>
+        )}
+        {err && (
+          <Item>
+            <div className="flex items-start gap-2 rounded-xl bg-rose-50 p-3 text-xs font-semibold text-rose-600">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /> {err}
+            </div>
+          </Item>
+        )}
         <Item>
-          <Button onClick={() => nav('/customer')}>Submit Review</Button>
+          <Button onClick={submit} disabled={busy}>
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : existing ? 'Back to Home' : 'Submit Review'}
+          </Button>
         </Item>
       </Stagger>
       <BottomNav role="customer" />

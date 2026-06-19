@@ -38,11 +38,12 @@ import {
 import { Button, Card, Badge, Stagger, Item, MapView, money, moneyCompact, Logo } from '../components/ui'
 import { RouteMap } from '../components/maps'
 import { TopBar, BottomNav, NotifBell } from '../components/nav'
-import { reviews, documents, moverNotifications } from '../lib/data'
+import { documents, moverNotifications } from '../lib/data'
 import { useAuth } from '../lib/AuthContext'
 import {
   listAvailableJobs,
   listMoverJobs,
+  listMoverReviews,
   getBooking,
   getBookingItems,
   acceptJob,
@@ -987,18 +988,23 @@ export function MoverProfile() {
   const nav = useNavigate()
   const { user, profile, signOut } = useAuth()
   const [jobs, setJobs] = useState([])
+  const [reviews, setReviews] = useState([])
   const avatar = profile?.avatar_url || 'https://i.pravatar.cc/120?img=12'
 
   useEffect(() => {
     if (!user) return
     listMoverJobs(user.id).then(setJobs).catch(() => {})
+    listMoverReviews(user.id).then(setReviews).catch(() => {})
   }, [user?.id])
 
   const delivered = jobs.filter((j) => j.status === 'delivered')
   const earnings = delivered.reduce((a, j) => a + Number(j.price || 0), 0)
+  const avgRating = reviews.length
+    ? (reviews.reduce((a, r) => a + Number(r.rating || 0), 0) / reviews.length).toFixed(1)
+    : '—'
   const stats = [
     [String(delivered.length), 'Trips', Navigation],
-    [delivered.length ? '5.0' : '—', 'Rating', Star],
+    [avgRating, 'Rating', Star],
     [moneyCompact(earnings), 'Earnings', Wallet],
   ]
   return (
@@ -1044,18 +1050,30 @@ export function MoverProfile() {
           <h3 className="text-base font-bold text-ink">Recent Reviews</h3>
           <span className="text-sm font-bold text-brand-600">View All</span>
         </Item>
+        {reviews.length === 0 && (
+          <Item>
+            <Card className="p-4 text-center text-xs text-slate-400">No reviews yet. Complete deliveries to earn ratings.</Card>
+          </Item>
+        )}
         {reviews.map((r) => (
-          <Item key={r.name}>
+          <Item key={r.id}>
             <Card className="p-4">
               <div className="flex items-center justify-between">
-                <p className="text-sm font-bold text-ink">{r.name}</p>
                 <div className="flex">
-                  {[...Array(r.stars)].map((_, i) => (
-                    <Star key={i} className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+                  {[...Array(5)].map((_, i) => (
+                    <Star key={i} className={`h-3.5 w-3.5 ${i < r.rating ? 'fill-amber-400 text-amber-400' : 'text-slate-300'}`} />
                   ))}
                 </div>
+                {r.tip > 0 && <span className="text-[11px] font-bold text-emerald-600">+{money(r.tip)} tip</span>}
               </div>
-              <p className="mt-1 text-xs text-slate-500">"{r.text}"</p>
+              {r.tags?.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {r.tags.map((t) => (
+                    <span key={t} className="rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-semibold text-brand-700">{t}</span>
+                  ))}
+                </div>
+              )}
+              {r.comment && <p className="mt-2 text-xs text-slate-500">"{r.comment}"</p>}
             </Card>
           </Item>
         ))}

@@ -138,6 +138,34 @@ export async function setStatus(bookingId, status) {
   return data
 }
 
+// ---------- reviews (customer rates mover after delivery) ----------
+export async function createReview(review) {
+  const { data, error } = await supabase.from('reviews').insert(review).select().single()
+  if (error) throw error
+  return data
+}
+
+// Existing review for a booking, or null. Used to block double-rating.
+export async function getReviewForBooking(bookingId) {
+  const { data, error } = await supabase
+    .from('reviews')
+    .select('*')
+    .eq('booking_id', bookingId)
+    .maybeSingle()
+  if (error) throw error
+  return data
+}
+
+export async function listMoverReviews(moverId) {
+  const { data, error } = await supabase
+    .from('reviews')
+    .select('*')
+    .eq('mover_id', moverId)
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return data
+}
+
 export async function scanItem(itemId) {
   const { data, error } = await supabase
     .from('booking_items')
