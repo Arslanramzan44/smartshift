@@ -30,7 +30,7 @@ import {
 import { Button, Card, Field, money } from '../components/ui'
 import { RouteMap, PlacesField } from '../components/maps'
 import { TopBar } from '../components/nav'
-import { vehicles, services, bookingItems, distanceFee } from '../lib/data'
+import { vehicles, services, bookingItems, distanceFee, PER_KM_RATE } from '../lib/data'
 import { STORAGE_UNITS, STORAGE_DURATIONS, WAREHOUSES, storagePrice, createStorageBooking } from '../lib/storage'
 import { useAuth } from '../lib/AuthContext'
 import { createBooking } from '../lib/bookings'
@@ -90,7 +90,7 @@ export function BookWizard() {
   const vehicleObj = vehicles.find((v) => v.id === vehicle)
   const vehiclePrice = vehicleObj.price
   const distanceKm = routeInfo?.km || 0
-  const distanceTotal = distanceFee(vehicleObj, distanceKm)
+  const distanceTotal = distanceFee(distanceKm)
   const extrasTotal = services.filter((s) => extras.includes(s.id)).reduce((a, s) => a + s.price, 0)
   const storageDur = STORAGE_DURATIONS.find((d) => d.id === storage.duration)
   const storageTotal = storage.on ? storagePrice(storage.unit, storageDur.days) : 0
@@ -294,7 +294,6 @@ function StepLocations({ pickup, setPickup, dropoff, setDropoff, scheduleLabel, 
 
 /* ---------- Step 2: Vehicle & Services ---------- */
 function StepVehicle({ vehicle, setVehicle, extras, toggleExtra, vehiclePrice, distanceKm, distanceTotal, extrasTotal, storage, setStorage, storageTotal }) {
-  const vObj = vehicles.find((v) => v.id === vehicle)
   return (
     <>
       <div>
@@ -415,7 +414,7 @@ function StepVehicle({ vehicle, setVehicle, extras, toggleExtra, vehiclePrice, d
           <span className="flex items-center gap-1">
             <Route className="h-3.5 w-3.5 text-brand-500" />
             Distance
-            {distanceKm ? ` (${distanceKm.toFixed(1)} km × ${money(vObj.perKm)})` : ''}
+            {distanceKm ? ` (${distanceKm.toFixed(1)} km × ${money(PER_KM_RATE)})` : ''}
           </span>
           <span>{distanceKm ? money(distanceTotal) : 'Set route'}</span>
         </div>

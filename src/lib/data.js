@@ -1,18 +1,18 @@
 // Mock data powering the SmartShift demo
 
-// `price` = base fare (covers handling + min charge). `perKm` = distance rate
-// in PKR/km, multiplied by the pickup→drop-off route distance. Bigger vehicles
-// cost more per km (fuel + size).
+// `price` = base fare (covers handling + min charge).
 export const vehicles = [
-  { id: 'van', name: 'Van', cap: 'Up to 500kg', price: 2500, perKm: 60 },
-  { id: 'mini', name: 'Mini Truck', cap: 'Up to 1000kg', price: 4000, perKm: 90 },
-  { id: 'large', name: 'Large Truck', cap: 'Up to 3000kg', price: 7500, perKm: 140 },
-  { id: 'pickup', name: 'Pickup', cap: 'Open bed, 800kg', price: 3000, perKm: 70 },
+  { id: 'van', name: 'Van', cap: 'Up to 500kg', price: 2500 },
+  { id: 'mini', name: 'Mini Truck', cap: 'Up to 1000kg', price: 4000 },
+  { id: 'large', name: 'Large Truck', cap: 'Up to 3000kg', price: 7500 },
+  { id: 'pickup', name: 'Pickup', cap: 'Open bed, 800kg', price: 3000 },
 ]
 
-// Distance fee for a given vehicle over `km` kilometres, rounded to whole PKR.
-export const distanceFee = (vehicle, km) =>
-  vehicle && km ? Math.round(vehicle.perKm * km) : 0
+// Flat distance rate in PKR per kilometre of the pickup→drop-off route.
+export const PER_KM_RATE = 20
+
+// Distance fee over `km` kilometres, rounded to whole PKR.
+export const distanceFee = (km) => (km ? Math.round(PER_KM_RATE * km) : 0)
 
 export const services = [
   { id: 'packing', name: 'Packing Service', desc: 'Boxes and bubble wrap', price: 2000 },
