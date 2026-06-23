@@ -11,6 +11,7 @@ import {
   Calendar,
   Navigation,
   CheckCircle2,
+  XCircle,
   Circle,
   X,
   QrCode,
@@ -55,6 +56,8 @@ import {
   nextStatus,
   statusTone,
   matchesDelivery,
+  canCancel,
+  cancelBooking,
 } from '../lib/bookings'
 import { Html5Qrcode } from 'html5-qrcode'
 import { Capacitor } from '@capacitor/core'
@@ -453,6 +456,8 @@ export function MoverJobDetail() {
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
+  const [cancelErr, setCancelErr] = useState('')
 
   useEffect(() => {
     if (!id) return
@@ -480,6 +485,27 @@ export function MoverJobDetail() {
     }
   }
 
+  async function cancel() {
+    if (!booking || cancelling) return
+    if (!window.confirm('Cancel this job? The customer will be notified and this cannot be undone.')) return
+    setCancelErr('')
+    setCancelling(true)
+    try {
+      const updated = await cancelBooking(booking.id)
+      // Status guard returned null → the job already advanced past 'accepted'.
+      if (!updated) {
+        setCancelErr('This job is already underway and can no longer be cancelled.')
+        setBooking(await getBooking(booking.id))
+      } else {
+        setBooking(updated)
+      }
+    } catch (e) {
+      setCancelErr(e.message || 'Could not cancel the job.')
+    } finally {
+      setCancelling(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center text-slate-400">
@@ -502,6 +528,7 @@ export function MoverJobDetail() {
   const canScan = flowIdx >= STATUS_FLOW.indexOf('loading') && booking.status !== 'delivered' && items.length > 0
   const cta = NEXT_ACTION[booking.status]
   const done = booking.status === 'delivered'
+  const cancelled = booking.status === 'cancelled'
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -618,19 +645,46 @@ export function MoverJobDetail() {
               <p className="text-sm font-bold text-emerald-700">Delivery Completed</p>
             </Card>
           </Item>
-        ) : (
-          <Item className="flex gap-3">
-            <Button variant="ghost" className="w-auto px-5"><CircleHelp className="h-4 w-4" /> Issues?</Button>
-            {booking.status === 'at_dropoff' ? (
-              <Button onClick={() => nav(`/mover/confirm/${booking.id}`)}>
-                <QrCode className="h-4 w-4" /> Scan to Confirm Delivery
-              </Button>
-            ) : (
-              <Button onClick={advance} disabled={busy}>
-                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <>{cta} <Navigation className="h-4 w-4" /></>}
-              </Button>
-            )}
+        ) : cancelled ? (
+          <Item>
+            <Card className="flex flex-col items-center gap-2 bg-rose-50 p-5 text-center ring-1 ring-rose-100">
+              <XCircle className="h-8 w-8 text-rose-500" />
+              <p className="text-sm font-bold text-rose-700">Job Cancelled</p>
+            </Card>
           </Item>
+        ) : (
+          <>
+            <Item className="flex gap-3">
+              <Button variant="ghost" className="w-auto px-5"><CircleHelp className="h-4 w-4" /> Issues?</Button>
+              {booking.status === 'at_dropoff' ? (
+                <Button onClick={() => nav(`/mover/confirm/${booking.id}`)}>
+                  <QrCode className="h-4 w-4" /> Scan to Confirm Delivery
+                </Button>
+              ) : (
+                <Button onClick={advance} disabled={busy}>
+                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <>{cta} <Navigation className="h-4 w-4" /></>}
+                </Button>
+              )}
+            </Item>
+
+            {canCancel(booking.status) && (
+              <Item>
+                {cancelErr && (
+                  <div className="mb-3 flex items-start gap-2 rounded-xl bg-rose-50 p-3 text-xs font-semibold text-rose-600">
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /> {cancelErr}
+                  </div>
+                )}
+                <Button
+                  variant="ghost"
+                  onClick={cancel}
+                  disabled={cancelling}
+                  className="text-rose-600 ring-rose-200 hover:bg-rose-50"
+                >
+                  {cancelling ? <Loader2 className="h-4 w-4 animate-spin" /> : <><XCircle className="h-4 w-4" /> Cancel Booking</>}
+                </Button>
+              </Item>
+            )}
+          </>
         )}
       </Stagger>
       <BottomNav role="mover" />
