@@ -34,7 +34,7 @@ import { RouteMap } from '../components/maps'
 import { TopBar, BottomNav } from '../components/nav'
 import { ratingTags, tipOptions, customerNotifications } from '../lib/data'
 import { useAuth } from '../lib/AuthContext'
-import { listCustomerBookings, getBooking, STATUS_LABEL, STATUS_FLOW, statusTone, deliveryPayload, createReview, getReviewForBooking } from '../lib/bookings'
+import { listCustomerBookings, getBooking, STATUS_LABEL, STATUS_FLOW, statusTone, deliveryPayload, createReview, getReviewForBooking, canCancel, cancelBooking } from '../lib/bookings'
 import { getProfile } from '../lib/db'
 import { QRCodeSVG } from 'qrcode.react'
 import { ShieldCheck } from 'lucide-react'
@@ -214,6 +214,29 @@ export function CustomerTrack() {
   const [booking, setBooking] = useState(null)
   const [mover, setMover] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [cancelling, setCancelling] = useState(false)
+  const [cancelErr, setCancelErr] = useState('')
+
+  async function handleCancel() {
+    if (!booking || cancelling) return
+    if (!window.confirm('Cancel this booking? This cannot be undone.')) return
+    setCancelErr('')
+    setCancelling(true)
+    try {
+      const updated = await cancelBooking(booking.id)
+      // Status guard returned null → a mover advanced the job before we cancelled.
+      if (!updated) {
+        setCancelErr('This move is already underway and can no longer be cancelled.')
+        setBooking(await getBooking(booking.id))
+      } else {
+        setBooking(updated)
+      }
+    } catch (e) {
+      setCancelErr(e.message || 'Could not cancel the booking.')
+    } finally {
+      setCancelling(false)
+    }
+  }
 
   useEffect(() => {
     async function load() {
@@ -382,6 +405,30 @@ export function CustomerTrack() {
               <Link to="/customer/rating" state={{ bookingId: booking.id }}>
                 <Button className="mt-4"><Star className="h-4 w-4" /> Rate this move</Button>
               </Link>
+            )}
+
+            {canCancel(booking.status) && (
+              <>
+                {cancelErr && (
+                  <div className="mt-4 flex items-start gap-2 rounded-xl bg-rose-50 p-3 text-xs font-semibold text-rose-600">
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /> {cancelErr}
+                  </div>
+                )}
+                <Button
+                  variant="ghost"
+                  onClick={handleCancel}
+                  disabled={cancelling}
+                  className="mt-4 text-rose-600 ring-rose-200 hover:bg-rose-50"
+                >
+                  {cancelling ? <Loader2 className="h-4 w-4 animate-spin" /> : <><XCircle className="h-4 w-4" /> Cancel Booking</>}
+                </Button>
+              </>
+            )}
+
+            {booking.status === 'cancelled' && (
+              <div className="mt-4 flex items-center gap-2 rounded-xl bg-rose-50 p-3 text-xs font-semibold text-rose-600">
+                <XCircle className="h-4 w-4 shrink-0" /> This booking has been cancelled.
+              </div>
             )}
           </>
         )}

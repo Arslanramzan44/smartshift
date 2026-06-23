@@ -138,6 +138,25 @@ export async function setStatus(bookingId, status) {
   return data
 }
 
+// ---------- customer actions ----------
+// A move can only be called off before it's physically underway: while still
+// pending, or after a mover accepts but before they head to pickup.
+export const CANCELLABLE = ['pending', 'accepted']
+export const canCancel = (status) => CANCELLABLE.includes(status)
+
+// Cancel a booking. The status guard makes this a no-op (null) if the move has
+// already advanced past 'accepted' — e.g. a mover started en route concurrently.
+export async function cancelBooking(bookingId) {
+  const { data, error } = await supabase
+    .from('bookings')
+    .update({ status: 'cancelled' })
+    .eq('id', bookingId)
+    .in('status', CANCELLABLE)
+    .select()
+  if (error) throw error
+  return data?.[0] ?? null
+}
+
 // ---------- reviews (customer rates mover after delivery) ----------
 export async function createReview(review) {
   const { data, error } = await supabase.from('reviews').insert(review).select().single()
