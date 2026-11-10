@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx vite *)",
+      "Bash(npx eslint *)",
+      "Bash(grep -v \"exhaustive-deps\\\\|set-state-in-effect\\\\|cascading renders\\\\|^\\\\s*$\\\\|Effects are intended\\\\|body of an effect\\\\|Update external\\\\|Subscribe for\\\\|setState\\(\\) directly\\\\|setState synchronously\\\\|react.dev\\\\|^\\\\s*[0-9]* |\\\\^\\\\|warning  React Hook\")"
+    ]
+  }
+}

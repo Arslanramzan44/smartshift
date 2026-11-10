@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "admin": "cd admin && npm run dev",
     "build": "vite build",
+    "build:admin": "cd admin && npm run build",
     "lint": "eslint .",
     "preview": "vite preview",
     "sync": "vite build && cap sync",

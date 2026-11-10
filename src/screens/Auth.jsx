@@ -191,6 +191,7 @@ export function Register() {
         full_name: form.fullName.trim(),
         email: form.email.trim(),
         phone: form.phone.trim() || null,
+        verification_status: isMover ? 'pending' : 'approved',
       }
       if (avatar) profile.avatar_url = await uploadFile('avatars', user.id, avatar, 'avatar')
       if (isMover) {

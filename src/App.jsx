@@ -30,6 +30,14 @@ import {
   MoverDocuments,
   MoverNotifications,
 } from './screens/Mover'
+import { Dashboard as AdminDashboard } from '../admin/src/pages/Dashboard'
+import { DriverApprovals as AdminApprovals } from '../admin/src/pages/DriverApprovals'
+import { Drivers as AdminDrivers } from '../admin/src/pages/Drivers'
+import { UsersPage as AdminUsers } from '../admin/src/pages/Users'
+import { RidesPage as AdminRides } from '../admin/src/pages/Rides'
+import { LiveTrackingPage as AdminLiveTracking } from '../admin/src/pages/LiveTracking'
+import { SettingsPage as AdminSettings } from '../admin/src/pages/Settings'
+import { AdminLayout } from '../admin/src/components/AdminLayout'
 
 const SCREENS = [
   ['Onboarding', '/'],
@@ -55,6 +63,7 @@ const SCREENS = [
   ['Mover · Earnings', '/mover/earnings'],
   ['Mover · Documents', '/mover/documents'],
   ['Mover · Alerts', '/mover/notifications'],
+  ['Admin · Control Center', '/admin'],
 ]
 
 function Page({ children }) {
@@ -137,6 +146,15 @@ function AnimatedRoutes() {
         <Route path="/mover/documents" element={<RoleGuard role="mover"><Page><MoverDocuments /></Page></RoleGuard>} />
         <Route path="/mover/notifications" element={<RoleGuard role="mover"><Page><MoverNotifications /></Page></RoleGuard>} />
 
+        {/* SmartShift Admin Control Panel Routes */}
+        <Route path="/admin" element={<AdminLayout><AdminDashboard /></AdminLayout>} />
+        <Route path="/admin/approvals" element={<AdminLayout><AdminApprovals /></AdminLayout>} />
+        <Route path="/admin/drivers" element={<AdminLayout><AdminDrivers /></AdminLayout>} />
+        <Route path="/admin/users" element={<AdminLayout><AdminUsers /></AdminLayout>} />
+        <Route path="/admin/rides" element={<AdminLayout><AdminRides /></AdminLayout>} />
+        <Route path="/admin/live-map" element={<AdminLayout><AdminLiveTracking /></AdminLayout>} />
+        <Route path="/admin/settings" element={<AdminLayout><AdminSettings /></AdminLayout>} />
+
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AnimatePresence>
@@ -178,6 +196,20 @@ function ScreenLauncher() {
                   <X className="h-4 w-4" />
                 </button>
               </div>
+
+              {/* Admin Panel Direct Shortcut */}
+              <Link
+                to="/admin"
+                onClick={() => setOpen(false)}
+                className="mb-3 flex items-center justify-between rounded-xl bg-slate-950 px-3 py-2.5 text-xs font-bold text-white shadow-md hover:bg-slate-800 transition"
+              >
+                <span className="flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                  Admin Control Panel
+                </span>
+                <span className="rounded bg-brand-600 px-1.5 py-0.5 text-[9px] font-extrabold">OPERATIONS</span>
+              </Link>
+
               <div className="space-y-1">
                 {SCREENS.map(([label, to]) => (
                   <Link
@@ -201,6 +233,9 @@ function ScreenLauncher() {
 }
 
 export default function App() {
+  const location = useLocation()
+  const isAdmin = location.pathname.startsWith('/admin')
+
   // Android hardware back button: navigate back, or exit at the root.
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return
@@ -215,9 +250,9 @@ export default function App() {
   }, [])
 
   return (
-    <div className="mx-auto min-h-screen w-full max-w-md bg-slate-50 shadow-sm sm:max-w-lg">
+    <div className={isAdmin ? "w-full min-h-screen bg-[#090d16]" : "mx-auto min-h-screen w-full max-w-md bg-slate-50 shadow-sm sm:max-w-lg"}>
       <AnimatedRoutes />
-      <ScreenLauncher />
+      {!isAdmin && <ScreenLauncher />}
     </div>
   )
 }

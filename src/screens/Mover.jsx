@@ -50,6 +50,7 @@ import {
   acceptJob,
   setStatus,
   scanItem,
+  updateDriverLocation,
   STATUS_LABEL,
   STATUS_FLOW,
   NEXT_ACTION,
@@ -129,6 +130,44 @@ export function MoverDashboard() {
     <div className="flex min-h-screen flex-col">
       <TopBar brandLeft right={<NotifBell count={0} to="/mover/notifications" />} avatar={<Avatar url={profile?.avatar_url} />} />
       <Stagger className="flex-1 space-y-5 px-5 pb-6">
+        {/* verification status alert banner */}
+        {profile?.role === 'mover' && profile?.verification_status !== 'approved' && (
+          <Item>
+            <div className={`rounded-2xl border p-4 shadow-sm ${
+              profile?.verification_status === 'rejected'
+                ? 'border-rose-200 bg-rose-50 text-rose-800'
+                : profile?.verification_status === 'suspended'
+                ? 'border-red-200 bg-red-50 text-red-800'
+                : 'border-amber-200 bg-amber-50 text-amber-800'
+            }`}>
+              <div className="flex items-start gap-3">
+                <ShieldCheck className="mt-0.5 h-6 w-6 shrink-0 text-amber-600" />
+                <div className="flex-1 text-sm">
+                  <p className="font-bold">
+                    {profile?.verification_status === 'rejected'
+                      ? 'Verification Rejected by Admin'
+                      : profile?.verification_status === 'suspended'
+                      ? 'Driver Account Suspended'
+                      : 'Verification Pending Admin Approval'}
+                  </p>
+                  <p className="mt-1 text-xs opacity-90">
+                    {profile?.verification_status === 'rejected'
+                      ? (profile?.verification_notes || 'Your submitted driving license or police clearance certificate did not pass verification. Please update documents or contact admin.')
+                      : profile?.verification_status === 'suspended'
+                      ? 'Your account has been placed on hold by the SmartShift administration.'
+                      : 'Your driving license, CNIC, and police clearance certificate are under review. You cannot pick or accept customer ride requests until admin approval.'}
+                  </p>
+                  <div className="mt-2.5 flex items-center gap-2">
+                    <Link to="/mover/documents" className="inline-flex items-center gap-1 text-xs font-bold underline">
+                      View Documents <ChevronRight className="h-3 w-3" />
+                    </Link>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </Item>
+        )}
+
         {/* online banner */}
         <Item>
           <div
@@ -258,7 +297,13 @@ export function MoverAvailable() {
 
   const reject = (id) => setJobs((p) => p.filter((j) => j.id !== id))
 
+  const isApproved = profile?.role === 'mover' && profile?.verification_status === 'approved'
+
   async function accept(id) {
+    if (!isApproved) {
+      alert('Verification Required: Your driving license and police clearance certificate are awaiting admin approval before you can accept customer move requests.')
+      return
+    }
     setBusyId(id)
     try {
       const row = await acceptJob(id, user.id)
@@ -267,8 +312,8 @@ export function MoverAvailable() {
         return
       }
       nav(`/mover/job/${id}`)
-    } catch {
-      // ignore
+    } catch (e) {
+      alert(e.message || 'Could not accept job.')
     } finally {
       setBusyId(null)
     }
@@ -285,9 +330,28 @@ export function MoverAvailable() {
         }
         avatar={<Avatar url={profile?.avatar_url} />}
       />
-      <div className="flex items-center gap-2 bg-amber-50 px-5 py-2 text-xs font-semibold text-amber-700">
-        <span className="h-2 w-2 animate-pulse rounded-full bg-amber-500" /> Looking for jobs near your location...
-      </div>
+
+      {!isApproved ? (
+        <div className="mx-5 mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs font-semibold text-amber-900 shadow-sm">
+          <div className="flex items-start gap-2.5">
+            <ShieldCheck className="h-5 w-5 shrink-0 text-amber-600" />
+            <div>
+              <p className="font-extrabold text-sm text-amber-950">Driver Approval Required</p>
+              <p className="mt-1 text-xs text-amber-800 leading-relaxed">
+                You cannot accept or pick customer move requests until your driving license, CNIC, and police clearance certificate are officially approved by the SmartShift Admin.
+              </p>
+              <Link to="/mover/documents" className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-amber-900 underline">
+                Check Verification Documents <ChevronRight className="h-3 w-3" />
+              </Link>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 bg-amber-50 px-5 py-2 text-xs font-semibold text-amber-700">
+          <span className="h-2 w-2 animate-pulse rounded-full bg-amber-500" /> Looking for jobs near your location...
+        </div>
+      )}
+
       <div className="px-5 pt-4">
         <h1 className="text-2xl font-extrabold text-ink">Available Moves</h1>
         <p className="text-sm text-slate-500">{jobs.length} high-priority moves matching your profile</p>
@@ -329,9 +393,19 @@ export function MoverAvailable() {
                     <Button variant="ghost" onClick={() => reject(j.id)} className="flex-1" disabled={busyId === j.id}>
                       Reject
                     </Button>
-                    <Button onClick={() => accept(j.id)} className="flex-1" disabled={busyId === j.id}>
-                      {busyId === j.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <>Accept Job <ArrowRightInline /></>}
-                    </Button>
+                    {isApproved ? (
+                      <Button onClick={() => accept(j.id)} className="flex-1" disabled={busyId === j.id}>
+                        {busyId === j.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <>Accept Job <ArrowRightInline /></>}
+                      </Button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => alert('Approval Required: You must wait for admin verification of your driving license and police certification before accepting customer requests.')}
+                        className="flex-1 flex items-center justify-center gap-1.5 rounded-xl bg-slate-200 px-3 py-2.5 text-xs font-bold text-slate-600 opacity-90 transition hover:bg-slate-300"
+                      >
+                        <ShieldCheck className="h-4 w-4 text-slate-500" /> Approval Required
+                      </button>
+                    )}
                   </div>
                 </Card>
               </motion.div>
@@ -478,6 +552,18 @@ export function MoverJobDetail() {
     try {
       const b = await setStatus(booking.id, ns)
       setBooking(b)
+      if (['en_route', 'loading', 'in_transit', 'at_dropoff'].includes(ns)) {
+        const stepCoords = {
+          en_route: { lat: 31.5204 + (Math.random() - 0.5) * 0.01, lng: 74.3587 + (Math.random() - 0.5) * 0.01 },
+          loading: { lat: 31.5240, lng: 74.3540 },
+          in_transit: { lat: 31.4850, lng: 74.3200 },
+          at_dropoff: { lat: 31.4700, lng: 74.3050 },
+        }
+        const coords = stepCoords[ns]
+        if (coords && profile?.id) {
+          updateDriverLocation(profile.id, booking.id, coords.lat, coords.lng)
+        }
+      }
     } catch {
       // ignore
     } finally {
@@ -1262,88 +1348,88 @@ const docMeta = {
 
 export function MoverDocuments() {
   const { profile } = useAuth()
+  const vStatus = profile?.verification_status || 'pending'
+  
+  const statusMeta = {
+    approved: { label: 'Verified & Approved', tone: 'green', desc: 'All documents verified by admin. You can accept customer rides.' },
+    rejected: { label: 'Verification Rejected', tone: 'red', desc: profile?.verification_notes || 'Some documents were rejected. Please update your documents.' },
+    suspended: { label: 'Driver Suspended', tone: 'red', desc: 'Your account is suspended by admin.' },
+    pending: { label: 'Pending Admin Review', tone: 'amber', desc: 'Admin is reviewing your driving license and police clearance certificate.' },
+  }[vStatus] || { label: 'Pending Review', tone: 'amber', desc: 'Documents under review.' }
+
+  const realDocs = [
+    { id: 'license', name: 'Driving License', file: profile?.driving_license_url ? 'Driving-License.pdf' : null, uploaded: !!profile?.driving_license_url },
+    { id: 'police', name: 'Police Clearance Certificate', file: profile?.police_clearance_url ? 'Police-Certificate.pdf' : null, uploaded: !!profile?.police_clearance_url },
+    { id: 'cnic_f', name: 'CNIC — Front Side', file: profile?.cnic_front_url ? 'CNIC-Front.jpg' : null, uploaded: !!profile?.cnic_front_url },
+    { id: 'cnic_b', name: 'CNIC — Back Side', file: profile?.cnic_back_url ? 'CNIC-Back.jpg' : null, uploaded: !!profile?.cnic_back_url },
+  ]
+
   return (
     <div className="flex min-h-screen flex-col">
       <TopBar brandLeft back avatar={<Avatar url={profile?.avatar_url} />} />
       <Stagger className="flex-1 space-y-4 px-5 pb-6">
         <Item>
-          <h1 className="text-xl font-extrabold text-ink">Vehicle Documents</h1>
+          <div className="flex items-center justify-between">
+            <h1 className="text-xl font-extrabold text-ink">Driver Documents</h1>
+            <Badge tone={statusMeta.tone}>{statusMeta.label}</Badge>
+          </div>
+          <p className="mt-1 text-xs text-slate-500">{statusMeta.desc}</p>
         </Item>
+
         <Item>
           <Card className="flex gap-3 p-4">
             <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-600 text-white">
-              <Shield className="h-5 w-5" />
+              <ShieldCheck className="h-5 w-5" />
             </span>
             <div>
-              <p className="text-sm font-bold text-ink">Verification Required</p>
+              <p className="text-sm font-bold text-ink">Administrative Verification</p>
               <p className="mt-0.5 text-xs text-slate-500">
-                Please upload clear photos or scans of your vehicle documents to verify your eligibility as a SmartShift
-                Mover.
+                To guarantee safety, every SmartShift mover must have their driving license and police clearance certificate verified by admin before customer jobs can be accepted.
               </p>
             </div>
           </Card>
         </Item>
 
-        {documents.map((d) => {
-          const meta = docMeta[d.id]
-          const Icon = meta.icon
-          return (
-            <Item key={d.id}>
-              <Card className="p-4">
+        {realDocs.map((d) => (
+          <Item key={d.id}>
+            <Card className="p-4">
+              <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <span className="grid h-9 w-9 place-items-center rounded-xl bg-brand-50 text-brand-600">
-                    <Icon className="h-5 w-5" />
+                    <FileText className="h-5 w-5" />
                   </span>
-                  <div className="flex-1">
+                  <div>
                     <p className="text-sm font-bold text-ink">{d.name}</p>
-                    <p className="text-[11px] text-slate-400">{d.desc}</p>
+                    <p className="text-[11px] text-slate-400">
+                      {d.uploaded ? (d.file || 'Document uploaded on file') : 'Missing document'}
+                    </p>
                   </div>
-                  {d.status === 'uploading' ? (
-                    <span className="text-xs font-bold text-brand-600">Uploading...</span>
-                  ) : (
-                    meta.badge && <Badge tone={meta.badge[1]}>{meta.badge[0]}</Badge>
-                  )}
                 </div>
+                <Badge tone={d.uploaded ? (vStatus === 'approved' ? 'green' : 'amber') : 'red'}>
+                  {d.uploaded ? (vStatus === 'approved' ? 'Verified' : 'Under Review') : 'Required'}
+                </Badge>
+              </div>
 
-                {d.status === 'none' && (
-                  <button className="mt-3 flex w-full flex-col items-center gap-1 rounded-xl border-2 border-dashed border-brand-200 bg-brand-50/40 py-6 text-brand-600">
-                    <UploadCloud className="h-6 w-6" />
-                    <span className="text-sm font-bold">Tap to upload or take a photo</span>
-                    <span className="text-[11px] text-slate-400">JPG, PNG or PDF (Max 5MB)</span>
+              {d.uploaded ? (
+                <div className="mt-3 flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2 text-xs">
+                  <span className="font-semibold text-slate-600">Status: {statusMeta.label}</span>
+                  <Link to="/profile/edit" className="font-bold text-brand-600 underline">Update</Link>
+                </div>
+              ) : (
+                <Link to="/profile/edit" className="mt-3 block">
+                  <button className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-brand-300 bg-brand-50/50 py-2.5 text-xs font-bold text-brand-700">
+                    <UploadCloud className="h-4 w-4" /> Upload Document
                   </button>
-                )}
-
-                {(d.status === 'review' || d.status === 'uploading') && (
-                  <div className="mt-3 rounded-xl border border-slate-200 p-3">
-                    <div className="flex items-center justify-between">
-                      <span className="flex items-center gap-2 text-sm text-ink">
-                        <FileText className="h-4 w-4 text-slate-400" /> {d.file}
-                      </span>
-                      {d.status === 'review' ? (
-                        <button className="text-xs font-bold text-brand-600">Edit</button>
-                      ) : (
-                        <X className="h-4 w-4 text-slate-400" />
-                      )}
-                    </div>
-                    {d.status === 'uploading' && (
-                      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-200">
-                        <motion.div
-                          className="h-full rounded-full bg-brand-600"
-                          initial={{ width: 0 }}
-                          animate={{ width: `${d.progress}%` }}
-                          transition={{ duration: 1.2 }}
-                        />
-                      </div>
-                    )}
-                  </div>
-                )}
-              </Card>
-            </Item>
-          )
-        })}
+                </Link>
+              )}
+            </Card>
+          </Item>
+        ))}
 
         <Item>
-          <Button variant="soft">Submit for Verification</Button>
+          <Link to="/profile/edit">
+            <Button variant="soft">Update / Re-submit Documents</Button>
+          </Link>
         </Item>
       </Stagger>
     </div>

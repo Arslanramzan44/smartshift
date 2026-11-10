@@ -114,6 +114,21 @@ export async function getBookingItems(bookingId) {
 // ---------- mover actions ----------
 // Atomically claim an unassigned pending job. Returns the row, or null if taken.
 export async function acceptJob(bookingId, moverId) {
+  // Enforce driver approval: no driver can pick request of customer before admin approval
+  const { data: prof, error: pErr } = await supabase
+    .from('profiles')
+    .select('verification_status, is_banned')
+    .eq('id', moverId)
+    .single()
+
+  if (pErr) console.warn('Could not verify mover status from db:', pErr)
+  if (prof?.is_banned) {
+    throw new Error('Your driver account has been suspended by the Admin. Please contact support.')
+  }
+  if (prof && prof.verification_status !== 'approved') {
+    throw new Error('Verification Required: Your driving license and police certification are awaiting admin approval before you can accept customer requests.')
+  }
+
   const { data, error } = await supabase
     .from('bookings')
     .update({ mover_id: moverId, status: 'accepted', accepted_at: new Date().toISOString() })
@@ -123,6 +138,20 @@ export async function acceptJob(bookingId, moverId) {
     .select()
   if (error) throw error
   return data?.[0] ?? null
+}
+
+export async function updateDriverLocation(moverId, bookingId, lat, lng) {
+  try {
+    const now = new Date().toISOString()
+    // Update mover profile coordinates
+    await supabase.from('profiles').update({ driver_lat: lat, driver_lng: lng, last_active_at: now }).eq('id', moverId)
+    // Update booking live driver coordinates if active
+    if (bookingId) {
+      await supabase.from('bookings').update({ driver_lat: lat, driver_lng: lng }).eq('id', bookingId)
+    }
+  } catch (err) {
+    console.warn('Failed to update driver coordinates:', err)
+  }
 }
 
 export async function setStatus(bookingId, status) {
