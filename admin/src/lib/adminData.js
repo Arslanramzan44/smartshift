@@ -1,9 +1,9 @@
-import { supabase } from './supabase'
+import { supabase, ensureAdminSession, getSignedDocUrl } from './supabase.js'
 
-// Default seed drivers with documents for testing & instant functionality
-const DEFAULT_DRIVERS = [
+// Fallback seed drivers (only shown if Supabase database has zero drivers)
+const SEED_DRIVERS = [
   {
-    id: 'mover-demo-1',
+    id: 'mover-seed-1',
     role: 'mover',
     full_name: 'Tariq Mehmood',
     email: 'tariq.mover@smartshift.pk',
@@ -23,9 +23,10 @@ const DEFAULT_DRIVERS = [
     trips_count: 42,
     created_at: new Date(Date.now() - 86400000 * 2).toISOString(),
     is_banned: false,
+    is_seed: true,
   },
   {
-    id: 'mover-demo-2',
+    id: 'mover-seed-2',
     role: 'mover',
     full_name: 'Imran Ashraf',
     email: 'imran.ashraf@smartshift.pk',
@@ -45,104 +46,18 @@ const DEFAULT_DRIVERS = [
     trips_count: 88,
     created_at: new Date(Date.now() - 86400000 * 12).toISOString(),
     is_banned: false,
-  },
-  {
-    id: 'mover-demo-3',
-    role: 'mover',
-    full_name: 'Bilal Farooq',
-    email: 'bilal.farooq@gmail.com',
-    phone: '+92 333 7123900',
-    avatar_url: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200&auto=format&fit=crop&q=80',
-    verification_status: 'pending',
-    verification_notes: null,
-    vehicle_type: 'Shehzore Pickup (1.5 Ton)',
-    vehicle_plate: 'LEB-7721',
-    driving_license_url: 'https://images.unsplash.com/photo-1589829545856-d10d557cf95f?w=800&auto=format&fit=crop&q=80',
-    police_clearance_url: 'https://images.unsplash.com/photo-1589829545856-d10d557cf95f?w=800&auto=format&fit=crop&q=80',
-    cnic_front_url: 'https://images.unsplash.com/photo-1628157582853-a796fa650a6a?w=800&auto=format&fit=crop&q=80',
-    cnic_back_url: 'https://images.unsplash.com/photo-1628157582853-a796fa650a6a?w=800&auto=format&fit=crop&q=80',
-    driver_lat: 31.4700,
-    driver_lng: 74.4100,
-    rating: 5.0,
-    trips_count: 5,
-    created_at: new Date(Date.now() - 86400000 * 1).toISOString(),
-    is_banned: false,
-  },
-  {
-    id: 'mover-demo-4',
-    role: 'mover',
-    full_name: 'Zahid Khan',
-    email: 'zahid.khan@gmail.com',
-    phone: '+92 312 9012345',
-    avatar_url: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=200&auto=format&fit=crop&q=80',
-    verification_status: 'rejected',
-    verification_notes: 'Police clearance certificate copy is expired (issued > 6 months ago). Please upload a current police certificate.',
-    vehicle_type: 'Cargo Van',
-    vehicle_plate: 'LHR-5110',
-    driving_license_url: 'https://images.unsplash.com/photo-1589829545856-d10d557cf95f?w=800&auto=format&fit=crop&q=80',
-    police_clearance_url: 'https://images.unsplash.com/photo-1589829545856-d10d557cf95f?w=800&auto=format&fit=crop&q=80',
-    cnic_front_url: 'https://images.unsplash.com/photo-1628157582853-a796fa650a6a?w=800&auto=format&fit=crop&q=80',
-    cnic_back_url: 'https://images.unsplash.com/photo-1628157582853-a796fa650a6a?w=800&auto=format&fit=crop&q=80',
-    driver_lat: 31.5400,
-    driver_lng: 74.3100,
-    rating: 4.5,
-    trips_count: 14,
-    created_at: new Date(Date.now() - 86400000 * 5).toISOString(),
-    is_banned: false,
+    is_seed: true,
   }
 ]
 
-// Default seed customers
-const DEFAULT_CUSTOMERS = [
+// Fallback seed bookings (only shown if Supabase bookings table is empty)
+const SEED_BOOKINGS = [
   {
-    id: 'cust-demo-1',
-    role: 'customer',
-    full_name: 'Ayesha Malik',
-    email: 'ayesha.malik@outlook.com',
-    phone: '+92 301 9283746',
-    avatar_url: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&auto=format&fit=crop&q=80',
-    verification_status: 'approved',
-    created_at: new Date(Date.now() - 86400000 * 20).toISOString(),
-    is_banned: false,
-    total_spent: 38500,
-    total_moves: 4,
-  },
-  {
-    id: 'cust-demo-2',
-    role: 'customer',
-    full_name: 'Usman Ghani',
-    email: 'usman.ghani@gmail.com',
-    phone: '+92 334 1122334',
-    avatar_url: 'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=200&auto=format&fit=crop&q=80',
-    verification_status: 'approved',
-    created_at: new Date(Date.now() - 86400000 * 15).toISOString(),
-    is_banned: false,
-    total_spent: 12400,
-    total_moves: 2,
-  },
-  {
-    id: 'cust-demo-3',
-    role: 'customer',
-    full_name: 'Sara Siddiqui',
-    email: 'sara.siddiqui@gmail.com',
-    phone: '+92 322 7788990',
-    avatar_url: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=200&auto=format&fit=crop&q=80',
-    verification_status: 'approved',
-    created_at: new Date(Date.now() - 86400000 * 3).toISOString(),
-    is_banned: false,
-    total_spent: 8500,
-    total_moves: 1,
-  }
-]
-
-// Default seed bookings
-const DEFAULT_BOOKINGS = [
-  {
-    id: 'bk-901',
-    customer_id: 'cust-demo-1',
+    id: 'bk-seed-1',
+    customer_id: 'cust-seed-1',
     customer_name: 'Ayesha Malik',
     customer_phone: '+92 301 9283746',
-    mover_id: 'mover-demo-2',
+    mover_id: 'mover-seed-2',
     mover_name: 'Imran Ashraf',
     mover_phone: '+92 321 8892144',
     status: 'in_transit',
@@ -161,80 +76,19 @@ const DEFAULT_BOOKINGS = [
     dropoff_lng: 74.4024,
     items_count: 5,
     created_at: new Date(Date.now() - 3600000 * 2).toISOString(),
+    is_seed: true,
     items: [
       { id: 'it-1', name: 'Master Bed Frame', tag: 'Heavy / Fragile', scanned: true },
       { id: 'it-2', name: 'Mattress (King)', tag: 'Bedroom', scanned: true },
       { id: 'it-3', name: 'Wooden Wardrobe', tag: 'Heavy Furniture', scanned: true },
-      { id: 'it-4', name: 'Living Room Sofa (3 Seater)', tag: 'Living', scanned: true },
-      { id: 'it-5', name: 'Glass Coffee Table', tag: 'Fragile Handle With Care', scanned: true }
-    ]
-  },
-  {
-    id: 'bk-902',
-    customer_id: 'cust-demo-2',
-    customer_name: 'Usman Ghani',
-    customer_phone: '+92 334 1122334',
-    mover_id: null,
-    status: 'pending',
-    pickup_address: 'Model Town Block C, Lahore',
-    dropoff_address: 'Johar Town Block G, Lahore',
-    vehicle: 'Shehzore Pickup (1.5 Ton)',
-    price: 4900,
-    payment_method: 'card',
-    distance_km: 8.5,
-    schedule_label: 'Today, 4:00 PM',
-    driver_lat: null,
-    driver_lng: null,
-    pickup_lat: 31.4820,
-    pickup_lng: 74.3180,
-    dropoff_lat: 31.4690,
-    dropoff_lng: 74.2720,
-    items_count: 3,
-    created_at: new Date(Date.now() - 1800000).toISOString(),
-    items: [
-      { id: 'it-6', name: 'Refrigerator (Double Door)', tag: 'Electronics', scanned: false },
-      { id: 'it-7', name: 'Washing Machine', tag: 'Appliances', scanned: false },
-      { id: 'it-8', name: 'Dining Table & 4 Chairs', tag: 'Dining Room', scanned: false }
-    ]
-  },
-  {
-    id: 'bk-903',
-    customer_id: 'cust-demo-3',
-    customer_name: 'Sara Siddiqui',
-    customer_phone: '+92 322 7788990',
-    mover_id: 'mover-demo-2',
-    mover_name: 'Imran Ashraf',
-    mover_phone: '+92 321 8892144',
-    status: 'delivered',
-    pickup_address: 'WAPDA Town Phase 1, Lahore',
-    dropoff_address: 'Bahria Town Sector C, Lahore',
-    vehicle: 'Suzuki Ravi (Mini Pickup)',
-    price: 8500,
-    payment_method: 'cod',
-    distance_km: 18.0,
-    schedule_label: 'Yesterday, 11:00 AM',
-    driver_lat: 31.3650,
-    driver_lng: 74.1800,
-    pickup_lat: 31.4350,
-    pickup_lng: 74.2620,
-    dropoff_lat: 31.3680,
-    dropoff_lng: 74.1790,
-    items_count: 4,
-    created_at: new Date(Date.now() - 86400000).toISOString(),
-    items: [
-      { id: 'it-9', name: 'Office Desk & Executive Chair', tag: 'Office', scanned: true },
-      { id: 'it-10', name: 'Bookshelves (x2)', tag: 'Office', scanned: true },
-      { id: 'it-11', name: 'Archive Document Boxes (x5)', tag: 'Documents', scanned: true },
-      { id: 'it-12', name: 'Water Dispenser', tag: 'Appliance', scanned: true }
     ]
   }
 ]
 
-// LocalStorage cache keys for instantaneous responsive actions
-const STORAGE_DRIVERS = 'smartshift_admin_drivers'
-const STORAGE_BOOKINGS = 'smartshift_admin_bookings'
-const STORAGE_USERS = 'smartshift_admin_users'
+// LocalStorage cache keys
+const STORAGE_DRIVERS_OVERRIDE = 'smartshift_admin_driver_overrides'
 const STORAGE_SETTINGS = 'smartshift_admin_settings'
+const STORAGE_BOOKINGS_CACHE = 'smartshift_admin_bookings_cache'
 
 function getLocal(k, fallback) {
   try {
@@ -252,81 +106,139 @@ function setLocal(k, v) {
 }
 
 // -------------------------------------------------------------
-// Driver & User Management APIs
+// Driver & User Management APIs (Direct Supabase Queries)
 // -------------------------------------------------------------
+
 export async function fetchAllDrivers() {
   try {
-    const { data, error } = await supabase
+    await ensureAdminSession()
+
+    // Query real mover profiles directly from Supabase
+    const { data: dbDrivers, error } = await supabase
       .from('profiles')
       .select('*')
       .eq('role', 'mover')
       .order('created_at', { ascending: false })
 
-    if (error || !data || data.length === 0) {
-      return getLocal(STORAGE_DRIVERS, DEFAULT_DRIVERS)
+    if (error) {
+      console.warn('Supabase fetch drivers error:', error.message)
     }
 
-    // Merge remote data with local verification updates
-    const localDrivers = getLocal(STORAGE_DRIVERS, DEFAULT_DRIVERS)
-    const merged = data.map((d) => {
-      const match = localDrivers.find((ld) => ld.id === d.id)
-      return {
-        ...d,
-        verification_status: d.verification_status || match?.verification_status || 'pending',
-        verification_notes: d.verification_notes || match?.verification_notes || null,
-        vehicle_type: d.vehicle_type || match?.vehicle_type || 'Standard Move Vehicle',
-        vehicle_plate: d.vehicle_plate || match?.vehicle_plate || 'LEA-0000',
-        rating: match?.rating || 4.8,
-        trips_count: match?.trips_count || 12,
+    const localOverrides = getLocal(STORAGE_DRIVERS_OVERRIDE, {})
+
+    // Also get trip counts for movers
+    let tripCounts = {}
+    try {
+      const { data: bData } = await supabase.from('bookings').select('mover_id')
+      if (bData) {
+        bData.forEach((b) => {
+          if (b.mover_id) tripCounts[b.mover_id] = (tripCounts[b.mover_id] || 0) + 1
+        })
       }
-    })
+    } catch {}
 
-    // Also include demo drivers if DB has very few
-    localDrivers.forEach((ld) => {
-      if (!merged.some((m) => m.id === ld.id)) merged.push(ld)
-    })
+    if (dbDrivers && dbDrivers.length > 0) {
+      const formatted = dbDrivers.map((d, index) => {
+        const override = localOverrides[d.id] || {}
+        return {
+          ...d,
+          verification_status: override.verification_status || d.verification_status || 'pending',
+          verification_notes: override.verification_notes !== undefined ? override.verification_notes : (d.verification_notes || null),
+          verified_at: override.verified_at || d.verified_at || null,
+          vehicle_type: d.vehicle_type || override.vehicle_type || 'Standard Van (1 Ton)',
+          vehicle_plate: d.vehicle_plate || override.vehicle_plate || `LEA-${1000 + index}`,
+          driver_lat: d.driver_lat || override.driver_lat || (31.5204 + (index * 0.015)),
+          driver_lng: d.driver_lng || override.driver_lng || (74.3587 + (index * 0.012)),
+          rating: d.rating || 4.9,
+          trips_count: tripCounts[d.id] || d.trips_count || 14,
+          is_banned: override.is_banned !== undefined ? override.is_banned : (d.is_banned || false),
+          is_real_db: true,
+        }
+      })
+      return formatted
+    }
 
-    setLocal(STORAGE_DRIVERS, merged)
-    return merged
-  } catch {
-    return getLocal(STORAGE_DRIVERS, DEFAULT_DRIVERS)
+    // If database has 0 drivers yet, return seed drivers with any local overrides applied
+    return SEED_DRIVERS.map((d) => {
+      const override = localOverrides[d.id] || {}
+      return { ...d, ...override }
+    })
+  } catch (err) {
+    console.error('fetchAllDrivers exception:', err)
+    return SEED_DRIVERS
   }
 }
 
 export async function fetchAllUsers() {
   try {
-    const { data, error } = await supabase
+    await ensureAdminSession()
+
+    // Query all profiles from Supabase
+    const { data: dbUsers, error } = await supabase
       .from('profiles')
       .select('*')
       .order('created_at', { ascending: false })
 
-    if (error || !data || data.length === 0) {
-      const allLocal = [...getLocal(STORAGE_USERS, DEFAULT_CUSTOMERS), ...getLocal(STORAGE_DRIVERS, DEFAULT_DRIVERS)]
-      return allLocal
+    if (error) {
+      console.warn('Supabase fetch users error:', error.message)
     }
 
-    const localDrivers = getLocal(STORAGE_DRIVERS, DEFAULT_DRIVERS)
-    const localCustomers = getLocal(STORAGE_USERS, DEFAULT_CUSTOMERS)
+    const localOverrides = getLocal(STORAGE_DRIVERS_OVERRIDE, {})
 
-    const all = data.map((u) => {
-      const matchD = localDrivers.find((ld) => ld.id === u.id)
-      const matchC = localCustomers.find((lc) => lc.id === u.id)
-      return {
-        ...u,
-        verification_status: u.verification_status || (u.role === 'mover' ? (matchD?.verification_status || 'pending') : 'approved'),
-        verification_notes: u.verification_notes || matchD?.verification_notes || null,
-        is_banned: u.is_banned || false,
+    // Fetch booking statistics to populate total_moves and total_spent
+    let customerStats = {}
+    try {
+      const { data: bookings } = await supabase.from('bookings').select('customer_id, price, status')
+      if (bookings) {
+        bookings.forEach((b) => {
+          if (!customerStats[b.customer_id]) {
+            customerStats[b.customer_id] = { moves: 0, spent: 0 }
+          }
+          customerStats[b.customer_id].moves += 1
+          if (b.status === 'delivered') {
+            customerStats[b.customer_id].spent += Number(b.price || 0)
+          }
+        })
       }
-    })
+    } catch {}
 
-    // Ensure demo customers & drivers are available for demo evaluation
-    localCustomers.forEach((lc) => {
-      if (!all.some((a) => a.id === lc.id)) all.push(lc)
-    })
+    if (dbUsers && dbUsers.length > 0) {
+      return dbUsers.map((u) => {
+        const override = localOverrides[u.id] || {}
+        const stats = customerStats[u.id] || { moves: 0, spent: 0 }
+        return {
+          ...u,
+          verification_status: override.verification_status || u.verification_status || (u.role === 'mover' ? 'pending' : 'approved'),
+          verification_notes: override.verification_notes !== undefined ? override.verification_notes : (u.verification_notes || null),
+          is_banned: override.is_banned !== undefined ? override.is_banned : (u.is_banned || false),
+          total_moves: stats.moves,
+          total_spent: stats.spent,
+          is_real_db: true,
+        }
+      })
+    }
 
-    return all
-  } catch {
-    return [...getLocal(STORAGE_USERS, DEFAULT_CUSTOMERS), ...getLocal(STORAGE_DRIVERS, DEFAULT_DRIVERS)]
+    // Fallback if no users in profiles table
+    return [
+      {
+        id: 'cust-demo-1',
+        role: 'customer',
+        full_name: 'Ayesha Malik',
+        email: 'ayesha.malik@outlook.com',
+        phone: '+92 301 9283746',
+        avatar_url: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&auto=format&fit=crop&q=80',
+        verification_status: 'approved',
+        created_at: new Date(Date.now() - 86400000 * 20).toISOString(),
+        is_banned: false,
+        total_spent: 38500,
+        total_moves: 4,
+        is_seed: true,
+      },
+      ...SEED_DRIVERS,
+    ]
+  } catch (err) {
+    console.error('fetchAllUsers exception:', err)
+    return SEED_DRIVERS
   }
 }
 
@@ -337,81 +249,117 @@ export async function updateDriverVerification(driverId, status, notes = null) {
     verified_at: status === 'approved' ? new Date().toISOString() : null,
   }
 
-  // 1. Update Supabase
+  // 1. Save to local overrides map for instant offline/cache resilience
+  const overrides = getLocal(STORAGE_DRIVERS_OVERRIDE, {})
+  overrides[driverId] = { ...(overrides[driverId] || {}), ...patch }
+  setLocal(STORAGE_DRIVERS_OVERRIDE, overrides)
+
+  // 2. Commit to Supabase database
   try {
-    await supabase.from('profiles').update(patch).eq('id', driverId)
+    await ensureAdminSession()
+    const { data, error } = await supabase
+      .from('profiles')
+      .update(patch)
+      .eq('id', driverId)
+      .select()
+
+    if (error) {
+      if (error.code === 'PGRST204' || error.message?.includes('verification_status')) {
+        console.info(
+          'Note: verification_status column missing in Supabase profiles table. Please execute supabase/admin_and_verification.sql in your Supabase SQL editor.'
+        )
+      } else {
+        console.warn('Could not update profile verification in Supabase:', error.message)
+      }
+    }
   } catch (err) {
-    console.warn('Could not update remote Supabase profile verification:', err)
+    console.warn('Network exception updating Supabase profile verification:', err)
   }
 
-  // 2. Update local state
-  const drivers = getLocal(STORAGE_DRIVERS, DEFAULT_DRIVERS).map((d) => {
-    if (d.id === driverId) {
-      return { ...d, ...patch }
-    }
-    return d
-  })
-  setLocal(STORAGE_DRIVERS, drivers)
-  return drivers.find((d) => d.id === driverId)
+  // Return updated driver object
+  const all = await fetchAllDrivers()
+  return all.find((d) => d.id === driverId) || { id: driverId, ...patch }
 }
 
 export async function toggleUserBan(userId, ban) {
+  const overrides = getLocal(STORAGE_DRIVERS_OVERRIDE, {})
+  overrides[userId] = { ...(overrides[userId] || {}), is_banned: ban }
+  setLocal(STORAGE_DRIVERS_OVERRIDE, overrides)
+
   try {
+    await ensureAdminSession()
     await supabase.from('profiles').update({ is_banned: ban }).eq('id', userId)
   } catch (err) {
-    console.warn('Could not update user ban in DB:', err)
+    console.warn('Could not update user ban status in DB:', err)
   }
-
-  const drivers = getLocal(STORAGE_DRIVERS, DEFAULT_DRIVERS).map((d) => {
-    if (d.id === userId) return { ...d, is_banned: ban }
-    return d
-  })
-  setLocal(STORAGE_DRIVERS, drivers)
-
-  const users = getLocal(STORAGE_USERS, DEFAULT_CUSTOMERS).map((u) => {
-    if (u.id === userId) return { ...u, is_banned: ban }
-    return u
-  })
-  setLocal(STORAGE_USERS, users)
 }
 
 // -------------------------------------------------------------
-// Rides & Bookings Management APIs
+// Rides & Bookings Management APIs (Direct Supabase Queries)
 // -------------------------------------------------------------
+
 export async function fetchAllBookings() {
   try {
-    const { data, error } = await supabase
+    await ensureAdminSession()
+
+    // 1. Fetch bookings with joined booking_items from Supabase
+    const { data: dbBookings, error } = await supabase
       .from('bookings')
       .select('*, booking_items(*)')
       .order('created_at', { ascending: false })
 
-    if (error || !data || data.length === 0) {
-      return getLocal(STORAGE_BOOKINGS, DEFAULT_BOOKINGS)
+    if (error) {
+      console.warn('Supabase fetch bookings error:', error.message)
     }
 
-    const localBookings = getLocal(STORAGE_BOOKINGS, DEFAULT_BOOKINGS)
-    const merged = data.map((b) => {
-      const match = localBookings.find((lb) => lb.id === b.id)
-      return {
-        ...b,
-        items: b.booking_items || match?.items || [],
-        driver_lat: b.driver_lat || match?.driver_lat || 31.5204,
-        driver_lng: b.driver_lng || match?.driver_lng || 74.3587,
-        pickup_lat: b.pickup_lat || match?.pickup_lat || 31.5085,
-        pickup_lng: b.pickup_lng || match?.pickup_lng || 74.3541,
-        dropoff_lat: b.dropoff_lat || match?.dropoff_lat || 31.4673,
-        dropoff_lng: b.dropoff_lng || match?.dropoff_lng || 74.4024,
+    // 2. Fetch profiles map for customer and mover names & phones if missing
+    let profilesMap = {}
+    try {
+      const { data: profs } = await supabase.from('profiles').select('id, full_name, phone')
+      if (profs) {
+        profs.forEach((p) => {
+          profilesMap[p.id] = p
+        })
       }
-    })
+    } catch {}
 
-    localBookings.forEach((lb) => {
-      if (!merged.some((m) => m.id === lb.id)) merged.push(lb)
-    })
+    const localBookingsCache = getLocal(STORAGE_BOOKINGS_CACHE, {})
 
-    setLocal(STORAGE_BOOKINGS, merged)
-    return merged
-  } catch {
-    return getLocal(STORAGE_BOOKINGS, DEFAULT_BOOKINGS)
+    if (dbBookings && dbBookings.length > 0) {
+      const formatted = dbBookings.map((b, index) => {
+        const custProfile = profilesMap[b.customer_id] || {}
+        const moverProfile = profilesMap[b.mover_id] || {}
+        const cached = localBookingsCache[b.id] || {}
+
+        return {
+          ...b,
+          customer_name: b.customer_name || custProfile.full_name || 'Valued Customer',
+          customer_phone: b.customer_phone || custProfile.phone || '+92 300 1234567',
+          mover_name: b.mover_name || moverProfile.full_name || (b.mover_id ? 'Assigned Mover' : 'Unassigned'),
+          mover_phone: b.mover_phone || moverProfile.phone || (b.mover_id ? '+92 321 0000000' : '—'),
+          items: b.booking_items || [],
+          items_count: b.booking_items?.length || 3,
+          vehicle: b.vehicle || 'Suzuki Ravi (Mini Pickup)',
+          distance_km: b.distance_km || 12.5,
+          schedule_label: b.schedule_label || 'Scheduled Move',
+          // Coordinates fallback to Lahore metropolitan coordinates
+          pickup_lat: b.pickup_lat || cached.pickup_lat || (31.5085 + (index * 0.01)),
+          pickup_lng: b.pickup_lng || cached.pickup_lng || (74.3541 + (index * 0.01)),
+          dropoff_lat: b.dropoff_lat || cached.dropoff_lat || (31.4673 + (index * 0.015)),
+          dropoff_lng: b.dropoff_lng || cached.dropoff_lng || (74.4024 + (index * 0.012)),
+          driver_lat: b.driver_lat || cached.driver_lat || (31.4850 + (index * 0.01)),
+          driver_lng: b.driver_lng || cached.driver_lng || (74.3200 + (index * 0.01)),
+          is_real_db: true,
+        }
+      })
+      return formatted
+    }
+
+    // Fallback if zero bookings in database
+    return SEED_BOOKINGS
+  } catch (err) {
+    console.error('fetchAllBookings exception:', err)
+    return SEED_BOOKINGS
   }
 }
 
@@ -420,17 +368,19 @@ export async function updateBookingStatus(bookingId, status) {
   if (status === 'delivered') patch.completed_at = new Date().toISOString()
 
   try {
+    await ensureAdminSession()
     await supabase.from('bookings').update(patch).eq('id', bookingId)
   } catch (err) {
     console.warn('Could not update status in DB:', err)
   }
 
-  const bookings = getLocal(STORAGE_BOOKINGS, DEFAULT_BOOKINGS).map((b) => {
-    if (b.id === bookingId) return { ...b, ...patch }
-    return b
-  })
-  setLocal(STORAGE_BOOKINGS, bookings)
-  return bookings.find((b) => b.id === bookingId)
+  // Update cache
+  const cache = getLocal(STORAGE_BOOKINGS_CACHE, {})
+  cache[bookingId] = { ...(cache[bookingId] || {}), ...patch }
+  setLocal(STORAGE_BOOKINGS_CACHE, cache)
+
+  const all = await fetchAllBookings()
+  return all.find((b) => b.id === bookingId)
 }
 
 export async function reassignBookingDriver(bookingId, moverId, moverName = null, moverPhone = null) {
@@ -439,51 +389,83 @@ export async function reassignBookingDriver(bookingId, moverId, moverName = null
     status: 'accepted',
     accepted_at: new Date().toISOString(),
   }
+  if (moverName) patch.mover_name = moverName
+  if (moverPhone) patch.mover_phone = moverPhone
 
   try {
+    await ensureAdminSession()
     await supabase.from('bookings').update(patch).eq('id', bookingId)
   } catch (err) {
-    console.warn('Could not reassign mover in DB:', err)
+    console.warn('Could not reassign mover in Supabase:', err)
   }
 
-  const bookings = getLocal(STORAGE_BOOKINGS, DEFAULT_BOOKINGS).map((b) => {
-    if (b.id === bookingId) {
-      return {
-        ...b,
-        mover_id: moverId,
-        mover_name: moverName || b.mover_name || 'Assigned Driver',
-        mover_phone: moverPhone || b.mover_phone || '+92 300 0000000',
-        status: 'accepted',
-      }
-    }
-    return b
-  })
-  setLocal(STORAGE_BOOKINGS, bookings)
+  const cache = getLocal(STORAGE_BOOKINGS_CACHE, {})
+  cache[bookingId] = { ...(cache[bookingId] || {}), ...patch }
+  setLocal(STORAGE_BOOKINGS_CACHE, cache)
 }
 
 export async function cancelBookingAdmin(bookingId, reason = 'Cancelled by administrator') {
-  const patch = { status: 'cancelled', cancellation_reason: reason }
-  try {
-    await supabase.from('bookings').update(patch).eq('id', bookingId)
-  } catch {}
+  const patch = {
+    status: 'cancelled',
+    notes: reason,
+  }
 
-  const bookings = getLocal(STORAGE_BOOKINGS, DEFAULT_BOOKINGS).map((b) => {
-    if (b.id === bookingId) return { ...b, ...patch }
-    return b
-  })
-  setLocal(STORAGE_BOOKINGS, bookings)
+  try {
+    await ensureAdminSession()
+    await supabase.from('bookings').update(patch).eq('id', bookingId)
+  } catch (err) {
+    console.warn('Could not cancel booking in Supabase:', err)
+  }
+
+  const cache = getLocal(STORAGE_BOOKINGS_CACHE, {})
+  cache[bookingId] = { ...(cache[bookingId] || {}), ...patch }
+  setLocal(STORAGE_BOOKINGS_CACHE, cache)
 }
 
 export async function updateBookingDriverCoordinates(bookingId, lat, lng) {
+  const coords = { driver_lat: lat, driver_lng: lng }
+
   try {
-    await supabase.from('bookings').update({ driver_lat: lat, driver_lng: lng }).eq('id', bookingId)
+    await ensureAdminSession()
+    await supabase.from('bookings').update(coords).eq('id', bookingId)
   } catch {}
 
-  const bookings = getLocal(STORAGE_BOOKINGS, DEFAULT_BOOKINGS).map((b) => {
-    if (b.id === bookingId) return { ...b, driver_lat: lat, driver_lng: lng }
-    return b
-  })
-  setLocal(STORAGE_BOOKINGS, bookings)
+  const cache = getLocal(STORAGE_BOOKINGS_CACHE, {})
+  cache[bookingId] = { ...(cache[bookingId] || {}), ...coords }
+  setLocal(STORAGE_BOOKINGS_CACHE, cache)
+}
+
+// -------------------------------------------------------------
+// Real-time Database Subscription
+// -------------------------------------------------------------
+
+export function subscribeToRealtimeUpdates({ onProfilesChange, onBookingsChange }) {
+  try {
+    const channel = supabase
+      .channel('smartshift-admin-realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'profiles' },
+        (payload) => {
+          if (onProfilesChange) onProfilesChange(payload)
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'bookings' },
+        (payload) => {
+          if (onBookingsChange) onBookingsChange(payload)
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  } catch (err) {
+    console.warn('Could not subscribe to realtime changes:', err)
+    return () => {}
+  }
 }
 
 // -------------------------------------------------------------

@@ -23,6 +23,7 @@ import {
   fetchAllDrivers,
   fetchAllBookings,
   fetchAllUsers,
+  subscribeToRealtimeUpdates,
 } from '../lib/adminData'
 
 export function Dashboard() {
@@ -33,9 +34,8 @@ export function Dashboard() {
   const [inspectDriver, setInspectDriver] = useState(null)
   const [inspectRide, setInspectRide] = useState(null)
 
-  useEffect(() => {
-    async function loadData() {
-      setLoading(true)
+  const loadData = async () => {
+    try {
       const [d, b, u] = await Promise.all([
         fetchAllDrivers(),
         fetchAllBookings(),
@@ -44,9 +44,21 @@ export function Dashboard() {
       setDrivers(d)
       setBookings(b)
       setUsers(u)
+    } finally {
       setLoading(false)
     }
+  }
+
+  useEffect(() => {
+    setLoading(true)
     loadData()
+
+    const unsubscribe = subscribeToRealtimeUpdates({
+      onProfilesChange: () => loadData(),
+      onBookingsChange: () => loadData(),
+    })
+
+    return () => unsubscribe()
   }, [])
 
   const pendingDrivers = drivers.filter((d) => d.verification_status === 'pending')

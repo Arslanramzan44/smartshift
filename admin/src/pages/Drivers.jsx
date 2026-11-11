@@ -15,7 +15,7 @@ import {
   Radio,
 } from 'lucide-react'
 import { DocumentModal } from '../components/DocumentModal'
-import { fetchAllDrivers, updateDriverVerification, toggleUserBan } from '../lib/adminData'
+import { fetchAllDrivers, updateDriverVerification, toggleUserBan, subscribeToRealtimeUpdates } from '../lib/adminData'
 
 export function Drivers() {
   const [drivers, setDrivers] = useState([])
@@ -23,11 +23,21 @@ export function Drivers() {
   const [inspectDriver, setInspectDriver] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
+  const loadData = () => {
     fetchAllDrivers().then((res) => {
       setDrivers(res)
       setLoading(false)
     })
+  }
+
+  useEffect(() => {
+    loadData()
+
+    const unsubscribe = subscribeToRealtimeUpdates({
+      onProfilesChange: () => loadData(),
+    })
+
+    return () => unsubscribe()
   }, [])
 
   const filtered = drivers.filter(

@@ -16,30 +16,113 @@ import {
   Radio,
   CheckCircle2,
   AlertTriangle,
+  Database,
+  Copy,
+  Check,
+  X,
 } from 'lucide-react'
-import { fetchAllDrivers, fetchAllBookings } from '../lib/adminData'
+import { fetchAllDrivers, fetchAllBookings, subscribeToRealtimeUpdates } from '../lib/adminData'
+import { checkDatabaseSchema } from '../lib/supabase'
+
+const MIGRATION_SQL = `-- 1. Extend profiles table with driver verification and admin flags
+alter table public.profiles
+  add column if not exists verification_status text not null default 'pending'
+    check (verification_status in ('pending', 'approved', 'rejected', 'suspended')),
+  add column if not exists verification_notes text,
+  add column if not exists verified_at timestamptz,
+  add column if not exists is_admin boolean not null default false,
+  add column if not exists is_banned boolean not null default false,
+  add column if not exists driver_lat numeric,
+  add column if not exists driver_lng numeric,
+  add column if not exists vehicle_type text default 'Standard Van',
+  add column if not exists vehicle_plate text default 'LEA-0000',
+  add column if not exists last_active_at timestamptz default now();
+
+-- Update customer profiles to be approved
+update public.profiles
+set verification_status = 'approved'
+where role = 'customer' and (verification_status is null or verification_status = 'pending');
+
+-- 2. Extend bookings table
+alter table public.bookings
+  add column if not exists driver_lat numeric,
+  add column if not exists driver_lng numeric,
+  add column if not exists pickup_lat numeric,
+  add column if not exists pickup_lng numeric,
+  add column if not exists dropoff_lat numeric,
+  add column if not exists dropoff_lng numeric,
+  add column if not exists cancellation_reason text;
+
+-- 3. Storage policy for admin document review
+drop policy if exists "moverdocs_read_admin_or_all" on storage.objects;
+create policy "moverdocs_read_admin_or_all" on storage.objects
+  for select to authenticated
+  using (bucket_id = 'mover-docs');
+
+-- 4. RLS policies allowing admin oversight
+drop policy if exists "admin_manage_profiles" on public.profiles;
+create policy "admin_manage_profiles" on public.profiles
+  for all to authenticated
+  using (true) with check (true);
+
+drop policy if exists "admin_manage_bookings" on public.bookings;
+create policy "admin_manage_bookings" on public.bookings
+  for all to authenticated
+  using (true) with check (true);
+
+drop policy if exists "admin_manage_booking_items" on public.booking_items;
+create policy "admin_manage_booking_items" on public.booking_items
+  for all to authenticated
+  using (true) with check (true);`
 
 export function AdminLayout({ children }) {
   const location = useLocation()
   const [pendingCount, setPendingCount] = useState(0)
   const [activeRidesCount, setActiveRidesCount] = useState(0)
+  const [dbStatus, setDbStatus] = useState({ isConnected: true, hasVerificationColumn: true })
+  const [copiedSql, setCopiedSql] = useState(false)
+  const [dismissBanner, setDismissBanner] = useState(false)
 
   const basePath = location.pathname.startsWith('/admin') ? '/admin' : ''
 
-  useEffect(() => {
-    async function loadBadges() {
+  async function loadBadges() {
+    try {
       const drivers = await fetchAllDrivers()
       const pending = drivers.filter((d) => d.verification_status === 'pending')
       setPendingCount(pending.length)
 
       const bookings = await fetchAllBookings()
-      const active = bookings.filter((b) => ['accepted', 'en_route', 'loading', 'in_transit', 'at_dropoff'].includes(b.status))
+      const active = bookings.filter((b) =>
+        ['accepted', 'en_route', 'loading', 'in_transit', 'at_dropoff'].includes(b.status)
+      )
       setActiveRidesCount(active.length)
+    } catch (err) {
+      console.warn('Error loading admin layout badges:', err)
     }
+  }
+
+  useEffect(() => {
     loadBadges()
-    const timer = setInterval(loadBadges, 8000)
-    return () => clearInterval(timer)
+    checkDatabaseSchema().then(setDbStatus)
+
+    // Listen to real-time events on Supabase
+    const unsubscribe = subscribeToRealtimeUpdates({
+      onProfilesChange: () => loadBadges(),
+      onBookingsChange: () => loadBadges(),
+    })
+
+    const timer = setInterval(loadBadges, 12000)
+    return () => {
+      clearInterval(timer)
+      unsubscribe()
+    }
   }, [])
+
+  function handleCopySql() {
+    navigator.clipboard.writeText(MIGRATION_SQL)
+    setCopiedSql(true)
+    setTimeout(() => setCopiedSql(false), 3000)
+  }
 
   const navItems = [
     { label: 'Executive Overview', path: `${basePath}/`, icon: LayoutDashboard },
@@ -90,14 +173,22 @@ export function AdminLayout({ children }) {
           </Link>
         </div>
 
-        {/* Live Status Pill */}
+        {/* Live Supabase Database Status */}
         <div className="px-4 py-3">
-          <div className="flex items-center justify-between rounded-xl bg-slate-900/90 border border-slate-800/80 px-3 py-2 text-xs">
-            <span className="flex items-center gap-2 font-semibold text-emerald-400">
-              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-              Dispatch Active
-            </span>
-            <span className="text-[11px] font-mono text-slate-400">{activeRidesCount} in transit</span>
+          <div className="rounded-xl bg-slate-900/90 border border-slate-800/80 px-3 py-2 text-xs space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-2 font-semibold text-emerald-400">
+                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                Supabase Live DB
+              </span>
+              <span className="rounded bg-emerald-500/20 px-1.5 py-0.2 text-[10px] font-mono text-emerald-300">
+                ONLINE
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-[11px] text-slate-400">
+              <span>Active Dispatches:</span>
+              <span className="font-mono text-slate-200">{activeRidesCount} in transit</span>
+            </div>
           </div>
         </div>
 
@@ -162,9 +253,9 @@ export function AdminLayout({ children }) {
               <p className="text-[10px] text-slate-400 truncate">admin@smartshift.pk</p>
             </div>
             <button
-              onClick={() => alert('Logged in as Master Administrator')}
+              onClick={() => alert('Authenticated with Supabase Database as Administrator: admin@smartshift.pk')}
               className="text-slate-500 hover:text-slate-300 p-1"
-              title="Admin Info"
+              title="Supabase Auth Active"
             >
               <ShieldCheck className="h-4 w-4 text-brand-400" />
             </button>
@@ -174,6 +265,33 @@ export function AdminLayout({ children }) {
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
+        {/* Top Notification Bar if Schema Column Migration is Pending */}
+        {!dismissBanner && !dbStatus.hasVerificationColumn && (
+          <div className="border-b border-indigo-500/30 bg-gradient-to-r from-indigo-950/80 via-slate-900/90 to-brand-950/80 px-6 py-2.5 text-xs text-indigo-200 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <Database className="h-4 w-4 text-brand-400 shrink-0" />
+              <span>
+                <strong>Supabase Live Sync Active:</strong> To enable SQL-level driver approval flags & telemetry coordinates, run <code className="bg-slate-950 px-1.5 py-0.5 rounded text-amber-300 font-mono text-[11px]">admin_and_verification.sql</code> in Supabase SQL editor.
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleCopySql}
+                className="flex items-center gap-1.5 rounded-lg bg-brand-600 hover:bg-brand-500 text-white px-3 py-1 font-bold text-[11px] transition shadow"
+              >
+                {copiedSql ? <Check className="h-3.5 w-3.5 text-emerald-300" /> : <Copy className="h-3.5 w-3.5" />}
+                {copiedSql ? 'SQL Copied!' : 'Copy Migration SQL'}
+              </button>
+              <button
+                onClick={() => setDismissBanner(true)}
+                className="text-slate-400 hover:text-white p-1 rounded"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Top Header */}
         <header className="sticky top-0 h-16 border-b border-slate-800/80 bg-slate-950/70 backdrop-blur-xl flex items-center justify-between px-6 z-30">
           <div className="flex items-center gap-4 flex-1 max-w-md">

@@ -16,7 +16,7 @@ import {
   Unlock,
 } from 'lucide-react'
 import { DocumentModal } from '../components/DocumentModal'
-import { fetchAllDrivers, updateDriverVerification } from '../lib/adminData'
+import { fetchAllDrivers, updateDriverVerification, subscribeToRealtimeUpdates } from '../lib/adminData'
 
 export function DriverApprovals() {
   const [drivers, setDrivers] = useState([])
@@ -34,6 +34,12 @@ export function DriverApprovals() {
 
   useEffect(() => {
     loadDrivers()
+
+    const unsubscribe = subscribeToRealtimeUpdates({
+      onProfilesChange: () => loadDrivers(),
+    })
+
+    return () => unsubscribe()
   }, [])
 
   const filtered = drivers.filter((d) => {

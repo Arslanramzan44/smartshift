@@ -13,7 +13,7 @@ import {
   User,
 } from 'lucide-react'
 import { LiveTrackingMap } from '../components/LiveTrackingMap'
-import { fetchAllBookings, fetchAllDrivers } from '../lib/adminData'
+import { fetchAllBookings, fetchAllDrivers, subscribeToRealtimeUpdates } from '../lib/adminData'
 
 export function LiveTrackingPage() {
   const [bookings, setBookings] = useState([])
@@ -21,17 +21,33 @@ export function LiveTrackingPage() {
   const [selectedRide, setSelectedRide] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
+  const loadData = () => {
     Promise.all([fetchAllBookings(), fetchAllDrivers()]).then(([b, d]) => {
       setBookings(b)
       setDrivers(d)
-      // Default to first active ride or first booking
-      const active = b.find((x) =>
-        ['accepted', 'en_route', 'loading', 'in_transit', 'at_dropoff'].includes(x.status)
-      )
-      setSelectedRide(active || b[0] || null)
+      setSelectedRide((prev) => {
+        if (prev) {
+          const fresh = b.find((x) => x.id === prev.id)
+          if (fresh) return fresh
+        }
+        const active = b.find((x) =>
+          ['accepted', 'en_route', 'loading', 'in_transit', 'at_dropoff'].includes(x.status)
+        )
+        return active || b[0] || null
+      })
       setLoading(false)
     })
+  }
+
+  useEffect(() => {
+    loadData()
+
+    const unsubscribe = subscribeToRealtimeUpdates({
+      onBookingsChange: () => loadData(),
+      onProfilesChange: () => loadData(),
+    })
+
+    return () => unsubscribe()
   }, [])
 
   const activeRides = bookings.filter((b) =>

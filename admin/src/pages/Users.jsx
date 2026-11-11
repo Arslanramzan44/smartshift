@@ -13,7 +13,7 @@ import {
   Eye,
 } from 'lucide-react'
 import { UserModal } from '../components/UserModal'
-import { fetchAllUsers } from '../lib/adminData'
+import { fetchAllUsers, subscribeToRealtimeUpdates } from '../lib/adminData'
 
 export function UsersPage() {
   const [users, setUsers] = useState([])
@@ -22,11 +22,21 @@ export function UsersPage() {
   const [selectedUser, setSelectedUser] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
+  const loadData = () => {
     fetchAllUsers().then((res) => {
       setUsers(res)
       setLoading(false)
     })
+  }
+
+  useEffect(() => {
+    loadData()
+
+    const unsubscribe = subscribeToRealtimeUpdates({
+      onProfilesChange: () => loadData(),
+    })
+
+    return () => unsubscribe()
   }, [])
 
   const filtered = users.filter((u) => {

@@ -18,6 +18,7 @@ import {
   ShieldAlert,
 } from 'lucide-react'
 import { updateDriverVerification } from '../lib/adminData'
+import { getSignedDocUrl } from '../lib/supabase'
 
 export function DocumentModal({ driver, onClose, onUpdated }) {
   const [activeTab, setActiveTab] = useState('license')
@@ -26,36 +27,68 @@ export function DocumentModal({ driver, onClose, onUpdated }) {
   const [busy, setBusy] = useState(false)
   const [showRejectBox, setShowRejectBox] = useState(false)
   const [rejectReason, setRejectReason] = useState('')
+  const [resolvedUrls, setResolvedUrls] = useState({})
+  const [loadingUrls, setLoadingUrls] = useState(true)
+
+  useEffect(() => {
+    if (!driver) return
+    let active = true
+    setLoadingUrls(true)
+
+    async function loadSignedUrls() {
+      const keys = ['driving_license_url', 'police_clearance_url', 'cnic_front_url', 'cnic_back_url']
+      const map = {}
+      for (const k of keys) {
+        const val = driver[k]
+        if (val) {
+          map[k] = await getSignedDocUrl(val)
+        }
+      }
+      if (active) {
+        setResolvedUrls(map)
+        setLoadingUrls(false)
+      }
+    }
+
+    loadSignedUrls()
+    return () => { active = false }
+  }, [driver])
 
   if (!driver) return null
+
+  const fallbackPlaceholder = 'https://images.unsplash.com/photo-1589829545856-d10d557cf95f?w=1000&auto=format&fit=crop&q=80'
 
   const docs = [
     {
       id: 'license',
       title: 'Driving License',
       desc: 'Official Pakistani Transport / LTV / HTV Driving License',
-      url: driver.driving_license_url || 'https://images.unsplash.com/photo-1589829545856-d10d557cf95f?w=1000&auto=format&fit=crop&q=80',
+      url: resolvedUrls.driving_license_url || (driver.driving_license_url?.startsWith('http') ? driver.driving_license_url : (driver.is_seed ? fallbackPlaceholder : null)),
+      rawPath: driver.driving_license_url,
       uploaded: !!driver.driving_license_url,
     },
     {
       id: 'police',
       title: 'Police Clearance Certificate',
       desc: 'Criminal Record & Character Clearance issued by Police Khidmat Markaz',
-      url: driver.police_clearance_url || 'https://images.unsplash.com/photo-1589829545856-d10d557cf95f?w=1000&auto=format&fit=crop&q=80',
+      url: resolvedUrls.police_clearance_url || (driver.police_clearance_url?.startsWith('http') ? driver.police_clearance_url : (driver.is_seed ? fallbackPlaceholder : null)),
+      rawPath: driver.police_clearance_url,
       uploaded: !!driver.police_clearance_url,
     },
     {
       id: 'cnic_front',
       title: 'CNIC — Front Side',
       desc: 'National Identity Card (NADRA) Front Side with Photo and CNIC #',
-      url: driver.cnic_front_url || 'https://images.unsplash.com/photo-1628157582853-a796fa650a6a?w=1000&auto=format&fit=crop&q=80',
+      url: resolvedUrls.cnic_front_url || (driver.cnic_front_url?.startsWith('http') ? driver.cnic_front_url : (driver.is_seed ? fallbackPlaceholder : null)),
+      rawPath: driver.cnic_front_url,
       uploaded: !!driver.cnic_front_url,
     },
     {
       id: 'cnic_back',
       title: 'CNIC — Back Side',
       desc: 'NADRA CNIC Reverse with Residential Address and Family Tree #',
-      url: driver.cnic_back_url || 'https://images.unsplash.com/photo-1628157582853-a796fa650a6a?w=1000&auto=format&fit=crop&q=80',
+      url: resolvedUrls.cnic_back_url || (driver.cnic_back_url?.startsWith('http') ? driver.cnic_back_url : (driver.is_seed ? fallbackPlaceholder : null)),
+      rawPath: driver.cnic_back_url,
       uploaded: !!driver.cnic_back_url,
     },
   ]
@@ -274,16 +307,43 @@ export function DocumentModal({ driver, onClose, onUpdated }) {
 
             {/* Document Preview Canvas */}
             <div className="flex-1 overflow-auto p-6 flex items-center justify-center bg-[#070b12] min-h-[350px]">
-              <div
-                className="transition-transform duration-150 origin-center max-w-full"
-                style={{ transform: `scale(${zoom}) rotate(${rotation}deg)` }}
-              >
-                <img
-                  src={currentDoc.url}
-                  alt={currentDoc.title}
-                  className="max-h-[460px] w-auto rounded-xl object-contain shadow-2xl border border-slate-700/60"
-                />
-              </div>
+              {loadingUrls ? (
+                <div className="flex flex-col items-center gap-3 text-slate-400">
+                  <span className="h-8 w-8 rounded-full border-2 border-brand-500 border-t-transparent animate-spin" />
+                  <p className="text-xs">Generating secure link from Supabase storage...</p>
+                </div>
+              ) : currentDoc.url ? (
+                <div
+                  className="transition-transform duration-150 origin-center max-w-full"
+                  style={{ transform: `scale(${zoom}) rotate(${rotation}deg)` }}
+                >
+                  <img
+                    src={currentDoc.url}
+                    alt={currentDoc.title}
+                    onError={(e) => {
+                      e.target.onerror = null
+                      e.target.src = fallbackPlaceholder
+                    }}
+                    className="max-h-[460px] w-auto rounded-xl object-contain shadow-2xl border border-slate-700/60"
+                  />
+                </div>
+              ) : (
+                <div className="max-w-md rounded-2xl border border-slate-800 bg-slate-900/80 p-6 text-center space-y-3">
+                  <div className="grid h-12 w-12 place-items-center rounded-2xl bg-amber-500/20 text-amber-400 mx-auto">
+                    <FileText className="h-6 w-6" />
+                  </div>
+                  <h4 className="font-bold text-white text-sm">{currentDoc.title} Uploaded</h4>
+                  <p className="text-xs text-slate-400">
+                    File registered at Supabase storage path:
+                  </p>
+                  <code className="block rounded-xl bg-slate-950 p-2 text-[11px] font-mono text-brand-300 break-all border border-slate-800">
+                    {currentDoc.rawPath || 'No document path specified'}
+                  </code>
+                  <p className="text-[11px] text-slate-500">
+                    Run <span className="text-slate-300 font-mono">supabase/admin_and_verification.sql</span> to grant admin storage access to private buckets.
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Rejection Input Box (if open) */}

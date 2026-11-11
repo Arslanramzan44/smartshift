@@ -7,7 +7,7 @@ export function loadGoogleMaps() {
   promise = new Promise((resolve, reject) => {
     if (window.google?.maps) return resolve(window.google.maps)
 
-    const key = import.meta.env.VITE_GOOGLE_MAPS_API_KEY
+    const key = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || 'AIzaSyBcgWQXDLcpA4lEvE9SYpLo2qQdiPW0bz4'
     if (!key) return reject(new Error('Missing VITE_GOOGLE_MAPS_API_KEY'))
 
     const cbName = '__smartshift_admin_gmaps_cb'

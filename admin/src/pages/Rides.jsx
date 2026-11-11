@@ -14,7 +14,7 @@ import {
   Filter,
 } from 'lucide-react'
 import { RideModal } from '../components/RideModal'
-import { fetchAllBookings, fetchAllDrivers } from '../lib/adminData'
+import { fetchAllBookings, fetchAllDrivers, subscribeToRealtimeUpdates } from '../lib/adminData'
 
 export function RidesPage() {
   const [bookings, setBookings] = useState([])
@@ -24,12 +24,23 @@ export function RidesPage() {
   const [selectedRide, setSelectedRide] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
+  const loadData = () => {
     Promise.all([fetchAllBookings(), fetchAllDrivers()]).then(([b, d]) => {
       setBookings(b)
       setDrivers(d)
       setLoading(false)
     })
+  }
+
+  useEffect(() => {
+    loadData()
+
+    const unsubscribe = subscribeToRealtimeUpdates({
+      onBookingsChange: () => loadData(),
+      onProfilesChange: () => loadData(),
+    })
+
+    return () => unsubscribe()
   }, [])
 
   const filtered = bookings.filter((b) => {
