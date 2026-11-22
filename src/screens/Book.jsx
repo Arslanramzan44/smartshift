@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
@@ -31,7 +31,7 @@ import { Button, Card, Field, money } from '../components/ui'
 import { RouteMap, PlacesField } from '../components/maps'
 import { TopBar } from '../components/nav'
 import { vehicles, services, bookingItems, distanceFee, PER_KM_RATE } from '../lib/data'
-import { STORAGE_UNITS, STORAGE_DURATIONS, WAREHOUSES, storagePrice, createStorageBooking } from '../lib/storage'
+import { STORAGE_UNITS, STORAGE_DURATIONS, WAREHOUSES, storagePrice, createStorageBooking, listApprovedWarehouses } from '../lib/storage'
 import { useAuth } from '../lib/AuthContext'
 import { createBooking } from '../lib/bookings'
 
@@ -75,7 +75,8 @@ export function BookWizard() {
   const [dir, setDir] = useState(1)
   const [vehicle, setVehicle] = useState('van')
   const [extras, setExtras] = useState([])
-  const [storage, setStorage] = useState({ on: false, unit: 'medium', duration: 'm1' })
+  const [warehouses, setWarehouses] = useState([])
+  const [storage, setStorage] = useState({ on: false, unit: 'medium', duration: 'm1', warehouseId: '' })
   const [items, setItems] = useState(bookingItems.map((it) => ({ ...it, qty: 1 })))
   const [pickup, setPickup] = useState('')
   const [dropoff, setDropoff] = useState('')
@@ -85,15 +86,27 @@ export function BookWizard() {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
+  useEffect(() => {
+    listApprovedWarehouses()
+      .then((list) => {
+        setWarehouses(list)
+        if (list.length > 0) {
+          setStorage((s) => (s.warehouseId ? s : { ...s, warehouseId: list[0].id }))
+        }
+      })
+      .catch(() => {})
+  }, [])
+
   const toggleExtra = (id) => setExtras((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]))
 
+  const selectedWarehouse = warehouses.find((w) => w.id === storage.warehouseId) || warehouses[0] || null
   const vehicleObj = vehicles.find((v) => v.id === vehicle)
   const vehiclePrice = vehicleObj.price
   const distanceKm = routeInfo?.km || 0
   const distanceTotal = distanceFee(distanceKm)
   const extrasTotal = services.filter((s) => extras.includes(s.id)).reduce((a, s) => a + s.price, 0)
   const storageDur = STORAGE_DURATIONS.find((d) => d.id === storage.duration)
-  const storageTotal = storage.on ? storagePrice(storage.unit, storageDur.days) : 0
+  const storageTotal = storage.on ? storagePrice(storage.unit, storageDur.days, selectedWarehouse) : 0
   const addOnsTotal = extrasTotal + storageTotal
   const total = vehiclePrice + distanceTotal + addOnsTotal
 
@@ -112,6 +125,11 @@ export function BookWizard() {
           status: 'pending',
           pickup_address: pickup.trim(),
           dropoff_address: dropoff.trim(),
+          pickup_lat: routeInfo?.pickupLat ?? null,
+          pickup_lng: routeInfo?.pickupLng ?? null,
+          dropoff_lat: routeInfo?.dropoffLat ?? null,
+          dropoff_lng: routeInfo?.dropoffLng ?? null,
+          warehouse_id: storage.on && selectedWarehouse ? selectedWarehouse.id : null,
           vehicle: vehicleObj.name,
           schedule_label: scheduleLabel,
           distance_km: distanceKm ? Math.round(distanceKm * 10) / 10 : null,
@@ -122,20 +140,27 @@ export function BookWizard() {
         },
         items,
       )
-      // Optional add-on: also reserve a warehouse unit. Best-effort — never
-      // block the move booking if the storage table isn't set up.
+      // Optional add-on: also reserve a warehouse unit linked to the chosen approved hub.
       if (storage.on) {
         try {
           const u = STORAGE_UNITS.find((x) => x.id === storage.unit)
           await createStorageBooking({
             customer_id: user.id,
+            customer_name: profile?.full_name || user.email,
+            customer_phone: profile?.phone || null,
+            warehouse_id: selectedWarehouse?.id || null,
+            warehouse_owner_id: selectedWarehouse?.owner_id || null,
             unit_size: u.name,
-            warehouse: WAREHOUSES[0],
+            warehouse: selectedWarehouse ? `${selectedWarehouse.name} (${selectedWarehouse.city})` : WAREHOUSES[0],
             duration_label: storageDur.label,
             days: storageDur.days,
-            start_date: null,
+            start_date: new Date().toISOString().slice(0, 10),
             price: storageTotal,
+            payment_method: payMethod,
+            items_summary: items.map((i) => i.name).join(', '),
+            items_count: items.length || 1,
             status: 'reserved',
+            tracking_stage: 'reserved',
           })
         } catch {
           // ignore — move booking already placed
@@ -212,6 +237,7 @@ export function BookWizard() {
                 storage={storage}
                 setStorage={setStorage}
                 storageTotal={storageTotal}
+                warehouses={warehouses}
               />
             )}
             {step === 2 && <StepItems items={items} setItems={setItems} />}
@@ -293,7 +319,7 @@ function StepLocations({ pickup, setPickup, dropoff, setDropoff, scheduleLabel, 
 }
 
 /* ---------- Step 2: Vehicle & Services ---------- */
-function StepVehicle({ vehicle, setVehicle, extras, toggleExtra, vehiclePrice, distanceKm, distanceTotal, extrasTotal, storage, setStorage, storageTotal }) {
+function StepVehicle({ vehicle, setVehicle, extras, toggleExtra, vehiclePrice, distanceKm, distanceTotal, extrasTotal, storage, setStorage, storageTotal, warehouses = [] }) {
   return (
     <>
       <div>
@@ -362,6 +388,25 @@ function StepVehicle({ vehicle, setVehicle, extras, toggleExtra, vehiclePrice, d
 
         {storage.on && (
           <div className="mt-4 space-y-3 border-t border-slate-100 pt-4">
+            {warehouses.length > 0 && (
+              <div>
+                <p className="mb-1.5 text-xs font-semibold text-slate-500">Approved Warehouse Hub</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {warehouses.map((w) => (
+                    <button
+                      key={w.id}
+                      type="button"
+                      onClick={() => setStorage((s) => ({ ...s, warehouseId: w.id }))}
+                      className={`rounded-xl border px-3 py-1.5 text-xs font-semibold transition ${
+                        storage.warehouseId === w.id ? 'border-brand-600 bg-brand-50 text-brand-700' : 'border-slate-200 text-slate-600'
+                      }`}
+                    >
+                      {w.name} ({w.city})
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div>
               <p className="mb-1.5 text-xs font-semibold text-slate-500">Unit Size</p>
               <div className="grid grid-cols-3 gap-2">

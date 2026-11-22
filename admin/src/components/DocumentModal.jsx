@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   X,
   ShieldCheck,
@@ -9,9 +9,7 @@ import {
   ZoomIn,
   ZoomOut,
   RotateCw,
-  Eye,
   ExternalLink,
-  Car,
   Phone,
   Mail,
   Calendar,
@@ -41,7 +39,7 @@ export function DocumentModal({ driver, onClose, onUpdated }) {
       for (const k of keys) {
         const val = driver[k]
         if (val) {
-          map[k] = await getSignedDocUrl(val)
+          map[k] = await getSignedDocUrl(val, 3600, 'mover-docs')
         }
       }
       if (active) {
@@ -51,52 +49,57 @@ export function DocumentModal({ driver, onClose, onUpdated }) {
     }
 
     loadSignedUrls()
-    return () => { active = false }
+    return () => {
+      active = false
+    }
   }, [driver])
 
   if (!driver) return null
-
-  const fallbackPlaceholder = 'https://images.unsplash.com/photo-1589829545856-d10d557cf95f?w=1000&auto=format&fit=crop&q=80'
 
   const docs = [
     {
       id: 'license',
       title: 'Driving License',
       desc: 'Official Pakistani Transport / LTV / HTV Driving License',
-      url: resolvedUrls.driving_license_url || (driver.driving_license_url?.startsWith('http') ? driver.driving_license_url : (driver.is_seed ? fallbackPlaceholder : null)),
+      url: resolvedUrls.driving_license_url || null,
       rawPath: driver.driving_license_url,
-      uploaded: !!driver.driving_license_url,
+      uploaded: Boolean(driver.driving_license_url),
     },
     {
       id: 'police',
       title: 'Police Clearance Certificate',
       desc: 'Criminal Record & Character Clearance issued by Police Khidmat Markaz',
-      url: resolvedUrls.police_clearance_url || (driver.police_clearance_url?.startsWith('http') ? driver.police_clearance_url : (driver.is_seed ? fallbackPlaceholder : null)),
+      url: resolvedUrls.police_clearance_url || null,
       rawPath: driver.police_clearance_url,
-      uploaded: !!driver.police_clearance_url,
+      uploaded: Boolean(driver.police_clearance_url),
     },
     {
       id: 'cnic_front',
       title: 'CNIC — Front Side',
       desc: 'National Identity Card (NADRA) Front Side with Photo and CNIC #',
-      url: resolvedUrls.cnic_front_url || (driver.cnic_front_url?.startsWith('http') ? driver.cnic_front_url : (driver.is_seed ? fallbackPlaceholder : null)),
+      url: resolvedUrls.cnic_front_url || null,
       rawPath: driver.cnic_front_url,
-      uploaded: !!driver.cnic_front_url,
+      uploaded: Boolean(driver.cnic_front_url),
     },
     {
       id: 'cnic_back',
       title: 'CNIC — Back Side',
-      desc: 'NADRA CNIC Reverse with Residential Address and Family Tree #',
-      url: resolvedUrls.cnic_back_url || (driver.cnic_back_url?.startsWith('http') ? driver.cnic_back_url : (driver.is_seed ? fallbackPlaceholder : null)),
+      desc: 'NADRA CNIC Reverse with Residential Address',
+      url: resolvedUrls.cnic_back_url || null,
       rawPath: driver.cnic_back_url,
-      uploaded: !!driver.cnic_back_url,
+      uploaded: Boolean(driver.cnic_back_url),
     },
   ]
 
   const currentDoc = docs.find((d) => d.id === activeTab) || docs[0]
+  const isPdf = String(currentDoc.rawPath || currentDoc.url || '').toLowerCase().includes('.pdf')
 
   async function handleApprove() {
-    if (!confirm(`Are you sure you want to APPROVE driver ${driver.full_name}? This will instantly allow them to view and accept customer ride requests.`)) {
+    if (
+      !confirm(
+        `Are you sure you want to APPROVE driver ${driver.full_name}? This will instantly allow them to accept customer move requests.`
+      )
+    ) {
       return
     }
     setBusy(true)
@@ -129,12 +132,10 @@ export function DocumentModal({ driver, onClose, onUpdated }) {
   }
 
   async function handleSuspend() {
-    if (!confirm(`Are you sure you want to SUSPEND driver ${driver.full_name}? They will not be able to accept any customer jobs.`)) {
-      return
-    }
+    if (!confirm(`Are you sure you want to SUSPEND driver ${driver.full_name}?`)) return
     setBusy(true)
     try {
-      const updated = await updateDriverVerification(driver.id, 'suspended', 'Suspended by admin investigation.')
+      const updated = await updateDriverVerification(driver.id, 'suspended', 'Suspended by admin review.')
       if (onUpdated) onUpdated(updated)
       onClose()
     } catch (err) {
@@ -147,7 +148,7 @@ export function DocumentModal({ driver, onClose, onUpdated }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 overflow-y-auto">
       <div className="relative w-full max-w-5xl rounded-3xl border border-slate-700/80 bg-slate-900 shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
-        {/* Modal Top Header */}
+        {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-800 bg-slate-950/80 px-6 py-4">
           <div className="flex items-center gap-3">
             <span className="grid h-10 w-10 place-items-center rounded-xl bg-brand-500/20 text-brand-400 border border-brand-500/30">
@@ -167,10 +168,10 @@ export function DocumentModal({ driver, onClose, onUpdated }) {
                       : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                   }`}
                 >
-                  {driver.verification_status || 'Pending Review'}
+                  {driver.verification_status || 'pending'}
                 </span>
               </h2>
-              <p className="text-xs text-slate-400">Examine uploaded government credentials and police clearance</p>
+              <p className="text-xs text-slate-400">Inspect uploaded driving license, CNIC, and police clearance</p>
             </div>
           </div>
 
@@ -182,22 +183,24 @@ export function DocumentModal({ driver, onClose, onUpdated }) {
           </button>
         </div>
 
-        {/* Modal Body: Split view */}
+        {/* Body */}
         <div className="flex-1 grid grid-cols-1 md:grid-cols-12 overflow-hidden">
           {/* Left: Driver Meta & Document Switcher */}
           <div className="md:col-span-4 border-r border-slate-800 p-5 space-y-5 overflow-y-auto bg-slate-950/40">
-            {/* Driver Identity Card */}
             <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
               <div className="flex items-center gap-3">
                 <img
-                  src={driver.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80'}
+                  src={
+                    driver.avatar_url ||
+                    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80'
+                  }
                   className="h-14 w-14 rounded-2xl object-cover ring-2 ring-brand-500/30"
                   alt=""
                 />
                 <div className="min-w-0 flex-1">
-                  <h3 className="font-extrabold text-white text-sm truncate">{driver.full_name}</h3>
-                  <p className="text-xs text-brand-400 font-semibold">{driver.vehicle_type || 'SmartShift Mover'}</p>
-                  <p className="text-[11px] font-mono text-slate-400">{driver.vehicle_plate || 'LEA-8492'}</p>
+                  <h3 className="font-extrabold text-white text-sm truncate">{driver.full_name || 'Mover'}</h3>
+                  <p className="text-xs text-brand-400 font-semibold">{driver.vehicle_type || 'Standard Van'}</p>
+                  <p className="text-[11px] font-mono text-slate-400">{driver.vehicle_plate || 'No plate'}</p>
                 </div>
               </div>
 
@@ -212,12 +215,11 @@ export function DocumentModal({ driver, onClose, onUpdated }) {
                 </p>
                 <p className="flex items-center gap-2">
                   <Calendar className="h-3.5 w-3.5 text-slate-500" />
-                  <span>Registered: {new Date(driver.created_at || Date.now()).toLocaleDateString()}</span>
+                  <span>Registered: {driver.created_at ? new Date(driver.created_at).toLocaleDateString() : '—'}</span>
                 </p>
               </div>
             </div>
 
-            {/* Document Selectors */}
             <div className="space-y-2">
               <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Required Documents</p>
               {docs.map((d) => {
@@ -240,30 +242,34 @@ export function DocumentModal({ driver, onClose, onUpdated }) {
                       <FileText className={`h-4 w-4 ${isSelected ? 'text-brand-400' : 'text-slate-500'}`} />
                       <div>
                         <p className="font-bold">{d.title}</p>
-                        <p className="text-[10px] text-slate-500">Document Uploaded</p>
+                        <p className={`text-[10px] ${d.uploaded ? 'text-emerald-400' : 'text-amber-400'}`}>
+                          {d.uploaded ? 'Uploaded' : 'Not Uploaded'}
+                        </p>
                       </div>
                     </div>
-                    <CheckCircle className={`h-4 w-4 ${d.uploaded ? 'text-emerald-400' : 'text-slate-600'}`} />
+                    {d.uploaded ? (
+                      <CheckCircle className="h-4 w-4 text-emerald-400" />
+                    ) : (
+                      <AlertTriangle className="h-4 w-4 text-amber-400" />
+                    )}
                   </button>
                 )
               })}
             </div>
 
-            {/* Current Notes / Status */}
             {driver.verification_notes && (
               <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300">
                 <p className="font-bold flex items-center gap-1.5">
                   <AlertTriangle className="h-4 w-4 text-rose-400" />
-                  Previous Rejection Reason:
+                  Review Note:
                 </p>
                 <p className="mt-1 text-slate-300">{driver.verification_notes}</p>
               </div>
             )}
           </div>
 
-          {/* Right: Document Inspection Viewer */}
+          {/* Right: Viewer */}
           <div className="md:col-span-8 flex flex-col bg-slate-900/50">
-            {/* Viewer Toolbar */}
             <div className="flex items-center justify-between border-b border-slate-800 px-5 py-3 bg-slate-950/40 text-xs">
               <div>
                 <p className="font-bold text-white">{currentDoc.title}</p>
@@ -293,60 +299,60 @@ export function DocumentModal({ driver, onClose, onUpdated }) {
                 >
                   <RotateCw className="h-4 w-4" />
                 </button>
-                <a
-                  href={currentDoc.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 ml-1"
-                  title="Open Original"
-                >
-                  <ExternalLink className="h-4 w-4" />
-                </a>
+                {currentDoc.url && (
+                  <a
+                    href={currentDoc.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 ml-1"
+                    title="Open Original"
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                  </a>
+                )}
               </div>
             </div>
 
-            {/* Document Preview Canvas */}
-            <div className="flex-1 overflow-auto p-6 flex items-center justify-center bg-[#070b12] min-h-[350px]">
+            <div className="flex-1 overflow-auto p-6 flex items-center justify-center bg-[#070b12] min-h-[340px]">
               {loadingUrls ? (
                 <div className="flex flex-col items-center gap-3 text-slate-400">
                   <span className="h-8 w-8 rounded-full border-2 border-brand-500 border-t-transparent animate-spin" />
-                  <p className="text-xs">Generating secure link from Supabase storage...</p>
+                  <p className="text-xs">Loading secure document from Supabase storage...</p>
                 </div>
               ) : currentDoc.url ? (
-                <div
-                  className="transition-transform duration-150 origin-center max-w-full"
-                  style={{ transform: `scale(${zoom}) rotate(${rotation}deg)` }}
-                >
-                  <img
+                isPdf ? (
+                  <iframe
                     src={currentDoc.url}
-                    alt={currentDoc.title}
-                    onError={(e) => {
-                      e.target.onerror = null
-                      e.target.src = fallbackPlaceholder
-                    }}
-                    className="max-h-[460px] w-auto rounded-xl object-contain shadow-2xl border border-slate-700/60"
+                    title={currentDoc.title}
+                    className="h-[440px] w-full rounded-xl border border-slate-700 bg-white"
                   />
-                </div>
-              ) : (
-                <div className="max-w-md rounded-2xl border border-slate-800 bg-slate-900/80 p-6 text-center space-y-3">
-                  <div className="grid h-12 w-12 place-items-center rounded-2xl bg-amber-500/20 text-amber-400 mx-auto">
-                    <FileText className="h-6 w-6" />
+                ) : (
+                  <div
+                    className="transition-transform duration-150 origin-center max-w-full"
+                    style={{ transform: `scale(${zoom}) rotate(${rotation}deg)` }}
+                  >
+                    <img
+                      src={currentDoc.url}
+                      alt={currentDoc.title}
+                      className="max-h-[440px] w-auto rounded-xl object-contain shadow-2xl border border-slate-700/60"
+                    />
                   </div>
-                  <h4 className="font-bold text-white text-sm">{currentDoc.title} Uploaded</h4>
+                )
+              ) : (
+                <div className="max-w-md rounded-2xl border border-slate-800 bg-slate-900/80 p-6 text-center space-y-2">
+                  <div className="grid h-12 w-12 place-items-center rounded-2xl bg-amber-500/20 text-amber-400 mx-auto">
+                    <AlertTriangle className="h-6 w-6" />
+                  </div>
+                  <h4 className="font-bold text-white text-sm">Document Not Uploaded</h4>
                   <p className="text-xs text-slate-400">
-                    File registered at Supabase storage path:
-                  </p>
-                  <code className="block rounded-xl bg-slate-950 p-2 text-[11px] font-mono text-brand-300 break-all border border-slate-800">
-                    {currentDoc.rawPath || 'No document path specified'}
-                  </code>
-                  <p className="text-[11px] text-slate-500">
-                    Run <span className="text-slate-300 font-mono">supabase/admin_and_verification.sql</span> to grant admin storage access to private buckets.
+                    {currentDoc.rawPath
+                      ? `Could not resolve signed URL for ${currentDoc.rawPath}`
+                      : `The driver has not uploaded ${currentDoc.title} yet.`}
                   </p>
                 </div>
               )}
             </div>
 
-            {/* Rejection Input Box (if open) */}
             {showRejectBox && (
               <div className="p-4 border-t border-rose-500/30 bg-rose-950/20">
                 <p className="text-xs font-bold text-rose-300 mb-1.5">Specify reason for document rejection:</p>
@@ -375,21 +381,18 @@ export function DocumentModal({ driver, onClose, onUpdated }) {
               </div>
             )}
 
-            {/* Action Bar */}
-            <div className="border-t border-slate-800 p-4 bg-slate-950/80 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleSuspend}
-                  disabled={busy}
-                  className="flex items-center gap-1.5 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-400 hover:bg-red-500/20 transition"
-                >
-                  <ShieldAlert className="h-4 w-4" />
-                  Suspend Driver
-                </button>
-              </div>
+            <div className="border-t border-slate-800 p-4 bg-slate-950/80 flex flex-wrap items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={handleSuspend}
+                disabled={busy}
+                className="flex items-center gap-1.5 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-400 hover:bg-red-500/20 transition"
+              >
+                <ShieldAlert className="h-4 w-4" />
+                Suspend Driver
+              </button>
 
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2.5">
                 <button
                   type="button"
                   onClick={() => setShowRejectBox(!showRejectBox)}
@@ -404,10 +407,10 @@ export function DocumentModal({ driver, onClose, onUpdated }) {
                   type="button"
                   onClick={handleApprove}
                   disabled={busy}
-                  className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 px-5 py-2 text-xs font-extrabold text-white shadow-lg shadow-emerald-600/30 transition transform hover:scale-[1.02] active:scale-[0.98]"
+                  className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 px-5 py-2 text-xs font-extrabold text-white shadow-lg shadow-emerald-600/30 transition"
                 >
                   <CheckCircle className="h-4 w-4" />
-                  Approve Driver & Unlock Job Access
+                  Approve Driver & Unlock Jobs
                 </button>
               </div>
             </div>

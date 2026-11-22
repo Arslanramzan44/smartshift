@@ -1,13 +1,20 @@
 import { createClient } from '@supabase/supabase-js'
 
-const url = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_URL) || 'https://nctjfcdsxdeqfruezcub.supabase.co'
-const anon = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_ANON_KEY) || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5jdGpmY2RzeGRlcWZydWV6Y3ViIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODExNzk1OTQsImV4cCI6MjA5Njc1NTU5NH0.Je-F3iDigah-Wf8rJ_E4o6nB1VtFnAqJXR7woxgDUgM'
+const url =
+  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_URL) ||
+  'https://nctjfcdsxdeqfruezcub.supabase.co'
+const anon =
+  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_ANON_KEY) ||
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5jdGpmY2RzeGRlcWZydWV6Y3ViIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODExNzk1OTQsImV4cCI6MjA5Njc1NTU5NH0.Je-F3iDigah-Wf8rJ_E4o6nB1VtFnAqJXR7woxgDUgM'
 
+// Isolated storageKey keeps Admin auth completely separate from Customer/Mover/Warehouse sessions
+// when Admin is mounted under /admin inside the main app.
 export const supabase = createClient(url, anon, {
   auth: {
+    storageKey: 'smartshift-admin-auth',
     persistSession: true,
     autoRefreshToken: true,
-    detectSessionInUrl: true,
+    detectSessionInUrl: false,
   },
 })
 
@@ -18,18 +25,24 @@ export const ADMIN_CREDENTIALS = {
 
 let authPromise = null
 
-// Ensure an authenticated session with Supabase so Row Level Security policies permit queries
+// Ensure an authenticated ADMIN session with Supabase so admin RLS policies grant full visibility.
 export async function ensureAdminSession() {
   if (authPromise) return authPromise
 
   authPromise = (async () => {
     try {
       const { data: sessionData } = await supabase.auth.getSession()
-      if (sessionData?.session) {
+      const currentUser = sessionData?.session?.user
+      const isAlreadyAdmin =
+        currentUser &&
+        (currentUser.email === ADMIN_CREDENTIALS.email ||
+          currentUser.app_metadata?.is_admin === true)
+
+      if (isAlreadyAdmin) {
         return sessionData.session
       }
 
-      // Automatically sign in with the admin account
+      // Sign in cleanly with the admin account
       const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({
         email: ADMIN_CREDENTIALS.email,
         password: ADMIN_CREDENTIALS.password,
@@ -39,19 +52,13 @@ export async function ensureAdminSession() {
         return signInData.session
       }
 
-      // If sign in failed because user doesn't exist, sign up
-      const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({
-        email: ADMIN_CREDENTIALS.email,
-        password: ADMIN_CREDENTIALS.password,
-      })
-
-      if (!signUpErr && signUpData?.session) {
-        return signUpData.session
+      if (signInErr) {
+        console.error('Admin sign-in failed:', signInErr.message)
       }
 
       return null
     } catch (err) {
-      console.warn('ensureAdminSession warning:', err)
+      console.error('ensureAdminSession error:', err)
       return null
     } finally {
       authPromise = null
@@ -61,8 +68,8 @@ export async function ensureAdminSession() {
   return authPromise
 }
 
-// Generate signed URL for private mover documents stored in Supabase mover-docs bucket
-export async function getSignedDocUrl(path, expiresIn = 3600) {
+// Generate signed URL for private documents in Supabase storage (mover-docs or warehouse-docs).
+export async function getSignedDocUrl(path, expiresIn = 3600, bucket = 'mover-docs') {
   if (!path) return null
   if (path.startsWith('http://') || path.startsWith('https://') || path.startsWith('data:')) {
     return path
@@ -70,46 +77,59 @@ export async function getSignedDocUrl(path, expiresIn = 3600) {
 
   try {
     await ensureAdminSession()
-    const { data, error } = await supabase.storage.from('mover-docs').createSignedUrl(path, expiresIn)
+    const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, expiresIn)
     if (!error && data?.signedUrl) {
       return data.signedUrl
     }
-    // Fallback: try public URL
-    const pub = supabase.storage.from('mover-docs').getPublicUrl(path)
+    const pub = supabase.storage.from(bucket).getPublicUrl(path)
     return pub?.data?.publicUrl || null
   } catch (err) {
-    console.warn('Failed to generate signed document URL:', err)
+    console.warn(`Failed to generate signed URL (${bucket}/${path}):`, err)
     return null
   }
 }
 
-// Check if schema extensions from admin_and_verification.sql are installed
+// Verify admin connection and schema readiness (profiles.verification_status + warehouses table)
 export async function checkDatabaseSchema() {
   try {
-    await ensureAdminSession()
-    // Test if verification_status column exists in profiles
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('verification_status')
-      .limit(1)
+    const session = await ensureAdminSession()
+    if (!session) {
+      return {
+        isConnected: false,
+        hasVerificationColumn: false,
+        hasWarehousesTable: false,
+        message: 'Could not authenticate admin@smartshift.pk session.',
+      }
+    }
 
-    if (error && (error.code === 'PGRST204' || error.message?.includes('verification_status'))) {
+    const [profCheck, whCheck] = await Promise.all([
+      supabase.from('profiles').select('verification_status').limit(1),
+      supabase.from('warehouses').select('id').limit(1),
+    ])
+
+    const hasVerificationColumn = !profCheck.error
+    const hasWarehousesTable = !whCheck.error
+
+    if (!hasVerificationColumn || !hasWarehousesTable) {
       return {
         isConnected: true,
-        hasVerificationColumn: false,
-        message: 'verification_status column missing. Run supabase/admin_and_verification.sql in Supabase SQL editor.',
+        hasVerificationColumn,
+        hasWarehousesTable,
+        message: 'Run supabase/warehouse_and_admin.sql in Supabase SQL editor to sync schema.',
       }
     }
 
     return {
       isConnected: true,
       hasVerificationColumn: true,
-      message: 'Supabase schema fully synchronized.',
+      hasWarehousesTable: true,
+      message: 'Supabase live database & warehouse schema synchronized.',
     }
   } catch (err) {
     return {
       isConnected: false,
       hasVerificationColumn: false,
+      hasWarehousesTable: false,
       message: err.message,
     }
   }

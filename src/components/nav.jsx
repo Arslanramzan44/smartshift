@@ -11,6 +11,8 @@ import {
   User,
   LayoutGrid,
   MapPin,
+  Warehouse,
+  Radio,
 } from 'lucide-react'
 import { Logo } from './ui'
 
@@ -120,8 +122,21 @@ const moverTabs = [
   { to: '/mover/profile', icon: User, label: 'Profile' },
 ]
 
+const warehouseTabs = [
+  { to: '/warehouse', icon: LayoutGrid, label: 'Home', end: true },
+  { to: '/warehouse/bookings', icon: ClipboardList, label: 'Requests' },
+  { to: '/warehouse/tracking', icon: Radio, label: 'Tracking' },
+  { to: '/warehouse/facility', icon: Warehouse, label: 'Facility' },
+  { to: '/warehouse/profile', icon: User, label: 'Profile' },
+]
+
 export function BottomNav({ role = 'customer' }) {
-  const tabs = role === 'mover' ? moverTabs : customerTabs
+  const tabs =
+    role === 'mover'
+      ? moverTabs
+      : role === 'warehouse'
+      ? warehouseTabs
+      : customerTabs
   const { pathname } = useLocation()
   return (
     <>

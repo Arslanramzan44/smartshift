@@ -51,6 +51,7 @@ import {
   setStatus,
   scanItem,
   updateDriverLocation,
+  setDriverOnlineStatus,
   STATUS_LABEL,
   STATUS_FLOW,
   NEXT_ACTION,
@@ -94,32 +95,41 @@ function MoverRoute({ pickup, drop }) {
 
 /* ===================== Mover Dashboard ===================== */
 export function MoverDashboard() {
-  const { user, profile } = useAuth()
+  const { user, profile, refreshProfile } = useAuth()
   const [online, setOnline] = useState(() => localStorage.getItem('smartshift.online') !== 'false')
   const [jobs, setJobs] = useState([])
+  const [reviews, setReviews] = useState([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     if (!user) return
-    listMoverJobs(user.id)
-      .then(setJobs)
+    refreshProfile?.()
+    Promise.all([listMoverJobs(user.id), listMoverReviews(user.id)])
+      .then(([j, r]) => {
+        setJobs(j)
+        setReviews(r)
+      })
       .catch(() => {})
       .finally(() => setLoading(false))
-  }, [user?.id])
+  }, [user?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleOnline = () => {
     const v = !online
     setOnline(v)
     localStorage.setItem('smartshift.online', String(v))
+    if (user) setDriverOnlineStatus(user.id, v)
   }
 
   const activeJobs = jobs.filter((j) => !['delivered', 'cancelled'].includes(j.status))
   const active = activeJobs[0]
   const completed = jobs.filter((j) => j.status === 'delivered').length
+  const avgRating = reviews.length
+    ? (reviews.reduce((a, r) => a + Number(r.rating || 0), 0) / reviews.length).toFixed(1)
+    : '—'
   const stats = [
     { label: 'Active', value: String(activeJobs.length).padStart(2, '0') },
     { label: 'Completed', value: String(completed) },
-    { label: 'Rating', value: completed ? '5.0' : '—', star: true },
+    { label: 'Rating', value: avgRating, star: true },
   ]
   const upcoming = [
     { when: 'Tomorrow, 09:00 AM', text: 'Local Move · 3 Movers Required' },
@@ -448,13 +458,17 @@ export function MoverJobs() {
     return !['delivered', 'cancelled'].includes(j.status) // Active
   })
 
+  const weeklyEarnings = jobs
+    .filter((j) => j.status === 'delivered')
+    .reduce((a, j) => a + Number(j.price || 0), 0)
+
   return (
     <div className="flex min-h-screen flex-col">
       <TopBar brandLeft avatar={<Avatar url={profile?.avatar_url} />} />
       <div className="px-5 pt-1">
         <h1 className="text-2xl font-extrabold text-ink">My Jobs</h1>
         <p className="text-sm text-slate-500">Manage your active assignments and history.</p>
-        <p className="mt-2 text-sm font-bold text-brand-600">Earnings (Wk) {money(1240)}</p>
+        <p className="mt-2 text-sm font-bold text-brand-600">Total Earned {money(weeklyEarnings)}</p>
       </div>
       <div className="no-scrollbar -mx-1 mt-3 flex gap-2 overflow-x-auto px-6">
         {tabs.map((t) => (
@@ -545,6 +559,32 @@ export function MoverJobDetail() {
       .finally(() => setLoading(false))
   }, [id])
 
+  // Broadcast real live GPS telemetry to Supabase while job is active
+  useEffect(() => {
+    if (!booking || !profile?.id) return
+    if (['delivered', 'cancelled', 'pending'].includes(booking.status)) return
+    if (typeof navigator === 'undefined' || !navigator.geolocation) return
+
+    let lastPush = 0
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        const now = Date.now()
+        if (now - lastPush < 8000) return
+        lastPush = now
+        const { latitude, longitude, speed, heading } = pos.coords
+        updateDriverLocation(profile.id, booking.id, latitude, longitude, {
+          speed: speed != null && speed >= 0 ? Math.round(speed * 3.6) : null,
+          heading: heading != null && !Number.isNaN(heading) ? Math.round(heading) : null,
+        })
+      },
+      () => {
+        // GPS denied or unavailable; stage transitions still sync coordinates
+      },
+      { enableHighAccuracy: true, maximumAge: 10000, timeout: 15000 }
+    )
+    return () => navigator.geolocation.clearWatch(watchId)
+  }, [booking?.id, booking?.status, profile?.id])
+
   async function advance() {
     const ns = nextStatus(booking.status)
     if (!ns) return
@@ -552,17 +592,18 @@ export function MoverJobDetail() {
     try {
       const b = await setStatus(booking.id, ns)
       setBooking(b)
-      if (['en_route', 'loading', 'in_transit', 'at_dropoff'].includes(ns)) {
-        const stepCoords = {
-          en_route: { lat: 31.5204 + (Math.random() - 0.5) * 0.01, lng: 74.3587 + (Math.random() - 0.5) * 0.01 },
-          loading: { lat: 31.5240, lng: 74.3540 },
-          in_transit: { lat: 31.4850, lng: 74.3200 },
-          at_dropoff: { lat: 31.4700, lng: 74.3050 },
-        }
-        const coords = stepCoords[ns]
-        if (coords && profile?.id) {
-          updateDriverLocation(profile.id, booking.id, coords.lat, coords.lng)
-        }
+      if (['en_route', 'loading', 'in_transit', 'at_dropoff'].includes(ns) && profile?.id) {
+        const pLat = Number(booking.pickup_lat) || 31.5204
+        const pLng = Number(booking.pickup_lng) || 74.3587
+        const dLat = Number(booking.dropoff_lat) || 31.4697
+        const dLng = Number(booking.dropoff_lng) || 74.4024
+        const ratios = { en_route: 0.1, loading: 0.0, in_transit: 0.5, at_dropoff: 0.98 }
+        const r = ratios[ns] ?? 0.5
+        const lat = pLat + (dLat - pLat) * r
+        const lng = pLng + (dLng - pLng) * r
+        updateDriverLocation(profile.id, booking.id, lat, lng, {
+          speed: ns === 'loading' ? 0 : 38,
+        })
       }
     } catch {
       // ignore
@@ -1157,8 +1198,24 @@ export function MoverProfile() {
             <span className="absolute bottom-1 right-1 h-4 w-4 rounded-full bg-emerald-500 ring-2 ring-white" />
           </div>
           <h2 className="mt-3 text-xl font-extrabold text-ink">{profile?.full_name || 'SmartShift Mover'}</h2>
-          <Badge tone="brand" className="mt-1">
-            <BadgeCheck className="h-3.5 w-3.5" /> Verified Mover
+          <Badge
+            tone={
+              profile?.verification_status === 'approved'
+                ? 'green'
+                : profile?.verification_status === 'rejected' || profile?.verification_status === 'suspended'
+                ? 'red'
+                : 'amber'
+            }
+            className="mt-1"
+          >
+            <BadgeCheck className="h-3.5 w-3.5" />
+            {profile?.verification_status === 'approved'
+              ? 'Verified Mover'
+              : profile?.verification_status === 'rejected'
+              ? 'Verification Rejected'
+              : profile?.verification_status === 'suspended'
+              ? 'Suspended'
+              : 'Pending Admin Approval'}
           </Badge>
         </Item>
 
@@ -1179,10 +1236,10 @@ export function MoverProfile() {
               <Truck className="h-6 w-6" />
             </span>
             <div className="flex-1">
-              <p className="text-sm font-bold text-ink">Mini Truck</p>
-              <p className="text-xs text-slate-400">LED-1234</p>
+              <p className="text-sm font-bold text-ink">{profile?.vehicle_type || 'Standard Cargo Vehicle'}</p>
+              <p className="text-xs text-slate-400">{profile?.vehicle_plate || 'Plate not set'}</p>
             </div>
-            <Badge tone="slate">Standard</Badge>
+            <Badge tone="slate">Active</Badge>
           </Card>
         </Item>
 

@@ -18,12 +18,15 @@ import {
   Pencil,
   ShieldCheck,
   Headset,
+  Warehouse,
 } from 'lucide-react'
 import { Button, Field, FileUpload, Logo, Card, Stagger, Item } from '../components/ui'
 import { TopBar } from '../components/nav'
+import { PlacesField } from '../components/maps'
 import { setRole, getRole, homeFor } from '../lib/auth'
 import { supabase } from '../lib/supabase'
 import { uploadFile, upsertProfile, getProfile } from '../lib/db'
+import { createWarehouse, CITY_COORDS } from '../lib/warehouse'
 
 /* ===================== Onboarding ===================== */
 const slides = [
@@ -133,6 +136,15 @@ const moverDocs = [
   { key: 'police_clearance', label: 'Police Clearance Certificate', accept: 'image/*,application/pdf' },
 ]
 
+// Documents a warehouse partner must upload — all required for admin approval.
+const warehouseDocs = [
+  { key: 'business_license', label: 'Business / Trade License', accept: 'image/*,application/pdf' },
+  { key: 'property_ownership', label: 'Property Ownership / Lease Deed', accept: 'image/*,application/pdf' },
+  { key: 'fire_safety_cert', label: 'Fire & Safety Certificate', accept: 'image/*,application/pdf' },
+  { key: 'owner_cnic_front', label: 'Owner CNIC — Front Side' },
+  { key: 'owner_cnic_back', label: 'Owner CNIC — Back Side' },
+]
+
 export function ErrorMsg({ children }) {
   if (!children) return null
   return (
@@ -145,19 +157,47 @@ export function ErrorMsg({ children }) {
 
 export function Register() {
   const nav = useNavigate()
-  const [role, setRoleState] = useState(getRole() || 'customer')
+  const initialRole = getRole()
+  const [role, setRoleState] = useState(
+    ['customer', 'mover', 'warehouse'].includes(initialRole) ? initialRole : 'customer'
+  )
   const [show, setShow] = useState(false)
-  const [form, setForm] = useState({ fullName: '', email: '', phone: '', password: '' })
+  const [form, setForm] = useState({
+    fullName: '',
+    email: '',
+    phone: '',
+    password: '',
+    vehicleType: 'Mini Truck',
+    vehiclePlate: '',
+    warehouseName: '',
+    warehouseCity: 'Lahore',
+    warehouseAddress: '',
+    warehouseLat: 31.5204,
+    warehouseLng: 74.3587,
+    capacitySqm: '500',
+    smallUnits: '10',
+    mediumUnits: '8',
+    largeUnits: '5',
+    smallRate: '200',
+    mediumRate: '450',
+    largeRate: '900',
+    climateControlled: true,
+    cctvEnabled: true,
+    insured: true,
+  })
   const [avatar, setAvatar] = useState(null)
+  const [warehousePhoto, setWarehousePhoto] = useState(null)
   const [docs, setDocs] = useState({})
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
 
   const isMover = role === 'mover'
+  const isWarehouse = role === 'warehouse'
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
   const pickRole = (r) => {
     setRoleState(r)
     setRole(r)
+    setErr('')
   }
 
   async function submit(e) {
@@ -172,6 +212,14 @@ export function Register() {
       if (!avatar) return setErr('Profile photo is required.')
       for (const d of moverDocs) {
         if (!docs[d.key]) return setErr(`${d.label} is required.`)
+      }
+    }
+    if (isWarehouse) {
+      if (!avatar) return setErr('Owner profile photo is required.')
+      if (!form.warehouseName.trim()) return setErr('Warehouse name is required.')
+      if (!form.warehouseAddress.trim()) return setErr('Warehouse address is required.')
+      for (const d of warehouseDocs) {
+        if (!docs[d.key]) return setErr(`${d.label} is required for admin approval.`)
       }
     }
 
@@ -191,7 +239,11 @@ export function Register() {
         full_name: form.fullName.trim(),
         email: form.email.trim(),
         phone: form.phone.trim() || null,
-        verification_status: isMover ? 'pending' : 'approved',
+        verification_status: isMover || isWarehouse ? 'pending' : 'approved',
+      }
+      if (isMover) {
+        profile.vehicle_type = form.vehicleType || 'Mini Truck'
+        profile.vehicle_plate = form.vehiclePlate.trim() || null
       }
       if (avatar) profile.avatar_url = await uploadFile('avatars', user.id, avatar, 'avatar')
       if (isMover) {
@@ -202,6 +254,46 @@ export function Register() {
       }
 
       await upsertProfile(profile)
+
+      if (isWarehouse) {
+        const cityFallback = CITY_COORDS[form.warehouseCity] || CITY_COORDS.Lahore
+        const whPayload = {
+          owner_id: user.id,
+          name: form.warehouseName.trim(),
+          city: form.warehouseCity,
+          address: form.warehouseAddress.trim(),
+          lat: Number(form.warehouseLat) || cityFallback.lat,
+          lng: Number(form.warehouseLng) || cityFallback.lng,
+          contact_phone: form.phone.trim() || null,
+          contact_email: form.email.trim(),
+          total_capacity_sqm: Number(form.capacitySqm) || 500,
+          occupied_capacity_sqm: 0,
+          small_units_total: Number(form.smallUnits) || 10,
+          small_units_available: Number(form.smallUnits) || 10,
+          medium_units_total: Number(form.mediumUnits) || 8,
+          medium_units_available: Number(form.mediumUnits) || 8,
+          large_units_total: Number(form.largeUnits) || 5,
+          large_units_available: Number(form.largeUnits) || 5,
+          small_rate_daily: Number(form.smallRate) || 200,
+          medium_rate_daily: Number(form.mediumRate) || 450,
+          large_rate_daily: Number(form.largeRate) || 900,
+          climate_controlled: form.climateControlled,
+          cctv_enabled: form.cctvEnabled,
+          insured: form.insured,
+          security_24_7: true,
+          verification_status: 'pending',
+          business_license_url: await uploadFile('warehouse-docs', user.id, docs.business_license, 'business-license'),
+          property_ownership_url: await uploadFile('warehouse-docs', user.id, docs.property_ownership, 'ownership-deed'),
+          fire_safety_cert_url: await uploadFile('warehouse-docs', user.id, docs.fire_safety_cert, 'fire-safety'),
+          owner_cnic_front_url: await uploadFile('warehouse-docs', user.id, docs.owner_cnic_front, 'owner-cnic-front'),
+          owner_cnic_back_url: await uploadFile('warehouse-docs', user.id, docs.owner_cnic_back, 'owner-cnic-back'),
+        }
+        if (warehousePhoto) {
+          whPayload.image_url = await uploadFile('warehouse-photos', user.id, warehousePhoto, 'facility')
+        }
+        await createWarehouse(whPayload)
+      }
+
       setRole(role)
       nav(homeFor(role))
     } catch (e2) {
@@ -214,6 +306,7 @@ export function Register() {
   const roleOptions = [
     { id: 'customer', label: 'Customer', icon: User },
     { id: 'mover', label: 'Mover', icon: Truck },
+    { id: 'warehouse', label: 'Warehouse', icon: Warehouse },
   ]
 
   return (
@@ -221,9 +314,13 @@ export function Register() {
       <TopBar back brand />
       <Stagger className="space-y-5 px-5 pb-8">
         <Item className="text-center">
-          <h1 className="text-2xl font-extrabold text-ink">Join the Fleet</h1>
+          <h1 className="text-2xl font-extrabold text-ink">
+            {isWarehouse ? 'Partner Your Warehouse' : isMover ? 'Join the Fleet' : 'Create Your Account'}
+          </h1>
           <p className="mx-auto mt-1.5 max-w-xs text-sm text-slate-500">
-            Create your SmartShift account to start moving smarter today. Reliable logistics at your fingertips.
+            {isWarehouse
+              ? 'List your secure storage hub on SmartShift and manage unit bookings after admin approval.'
+              : 'Create your SmartShift account to start moving smarter today. Reliable logistics at your fingertips.'}
           </p>
         </Item>
 
@@ -231,7 +328,7 @@ export function Register() {
           <Card className="p-5">
             <form onSubmit={submit} className="space-y-4">
               {/* role toggle */}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-2">
                 {roleOptions.map((r) => {
                   const active = role === r.id
                   const Icon = r.icon
@@ -245,7 +342,7 @@ export function Register() {
                       }`}
                     >
                       <Icon className="h-5 w-5" />
-                      <span className="text-sm font-bold">{r.label}</span>
+                      <span className="text-xs font-bold">{r.label}</span>
                     </button>
                   )
                 })}
@@ -272,12 +369,13 @@ export function Register() {
                   />
                 </label>
                 <span className="mt-2 text-xs font-semibold text-slate-500">
-                  Upload Profile Picture {isMover && <span className="text-rose-500">*</span>}
+                  {isWarehouse ? 'Owner Profile Picture' : 'Upload Profile Picture'}{' '}
+                  {(isMover || isWarehouse) && <span className="text-rose-500">*</span>}
                 </span>
               </div>
 
               <Field label="Full Name" value={form.fullName} onChange={set('fullName')} placeholder="John Doe" />
-              <Field label="Phone Number" value={form.phone} onChange={set('phone')} placeholder="+1 (555) 000-0000" />
+              <Field label="Phone Number" value={form.phone} onChange={set('phone')} placeholder="+92 300 0000000" />
               <Field label="Email Address" type="email" value={form.email} onChange={set('email')} placeholder="john@example.com" />
               <Field
                 label="Password"
@@ -293,19 +391,128 @@ export function Register() {
               />
 
               {isMover && (
-                <div className="space-y-3 rounded-xl bg-slate-50 p-3">
-                  <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Verification Documents</p>
-                  {moverDocs.map((d) => (
-                    <FileUpload
-                      key={d.key}
-                      label={d.label}
-                      required
-                      accept={d.accept || 'image/*'}
-                      value={docs[d.key] || null}
-                      onChange={(f) => setDocs((p) => ({ ...p, [d.key]: f }))}
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <span className="mb-1.5 block text-xs font-semibold text-slate-500">Vehicle Type</span>
+                      <select
+                        value={form.vehicleType}
+                        onChange={set('vehicleType')}
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-ink outline-none focus:border-brand-400"
+                      >
+                        {['Van', 'Pickup', 'Mini Truck', 'Large Truck', 'Mazda Titan (3 Ton)'].map((v) => (
+                          <option key={v} value={v}>{v}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <Field label="License Plate" value={form.vehiclePlate} onChange={set('vehiclePlate')} placeholder="LEA-8492" />
+                  </div>
+                  <div className="space-y-3 rounded-xl bg-slate-50 p-3">
+                    <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Driver Verification Documents</p>
+                    {moverDocs.map((d) => (
+                      <FileUpload
+                        key={d.key}
+                        label={d.label}
+                        required
+                        accept={d.accept || 'image/*'}
+                        value={docs[d.key] || null}
+                        onChange={(f) => setDocs((p) => ({ ...p, [d.key]: f }))}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {isWarehouse && (
+                <>
+                  <div className="space-y-3 rounded-xl bg-brand-50/50 p-3.5 ring-1 ring-brand-100">
+                    <p className="text-xs font-bold uppercase tracking-wide text-brand-700">Warehouse Facility Details</p>
+                    <Field
+                      label="Warehouse Name *"
+                      value={form.warehouseName}
+                      onChange={set('warehouseName')}
+                      placeholder="e.g. SafeVault Gulberg Storage"
                     />
-                  ))}
-                </div>
+                    <div>
+                      <span className="mb-1.5 block text-xs font-semibold text-slate-500">City</span>
+                      <select
+                        value={form.warehouseCity}
+                        onChange={(e) => {
+                          const city = e.target.value
+                          const coords = CITY_COORDS[city] || CITY_COORDS.Lahore
+                          setForm((f) => ({ ...f, warehouseCity: city, warehouseLat: coords.lat, warehouseLng: coords.lng }))
+                        }}
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm text-ink outline-none focus:border-brand-400"
+                      >
+                        {Object.keys(CITY_COORDS).map((c) => (
+                          <option key={c} value={c}>{c}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <span className="mb-1.5 block text-xs font-semibold text-slate-500">Full Facility Address *</span>
+                      <PlacesField
+                        value={form.warehouseAddress}
+                        onChange={(v) => setForm((f) => ({ ...f, warehouseAddress: v }))}
+                        onPlace={({ address, lat, lng }) =>
+                          setForm((f) => ({ ...f, warehouseAddress: address, warehouseLat: lat, warehouseLng: lng }))
+                        }
+                        placeholder="Enter street & sector address"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <Field label="Total Area (m²)" type="number" value={form.capacitySqm} onChange={set('capacitySqm')} />
+                      <Field label="Small Units" type="number" value={form.smallUnits} onChange={set('smallUnits')} />
+                      <Field label="Medium Units" type="number" value={form.mediumUnits} onChange={set('mediumUnits')} />
+                      <Field label="Large Units" type="number" value={form.largeUnits} onChange={set('largeUnits')} />
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <Field label="Small/d (PKR)" type="number" value={form.smallRate} onChange={set('smallRate')} />
+                      <Field label="Med/d (PKR)" type="number" value={form.mediumRate} onChange={set('mediumRate')} />
+                      <Field label="Large/d (PKR)" type="number" value={form.largeRate} onChange={set('largeRate')} />
+                    </div>
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      {[
+                        ['climateControlled', 'Climate Controlled'],
+                        ['cctvEnabled', '24/7 CCTV'],
+                        ['insured', 'Insured'],
+                      ].map(([k, label]) => (
+                        <button
+                          key={k}
+                          type="button"
+                          onClick={() => setForm((f) => ({ ...f, [k]: !f[k] }))}
+                          className={`rounded-full border px-3 py-1 text-xs font-bold transition ${
+                            form[k] ? 'border-brand-600 bg-white text-brand-700' : 'border-slate-200 bg-white/60 text-slate-400'
+                          }`}
+                        >
+                          {form[k] ? '✓ ' : ''}{label}
+                        </button>
+                      ))}
+                    </div>
+                    <FileUpload
+                      label="Warehouse Facility Photo (Optional)"
+                      value={warehousePhoto}
+                      onChange={setWarehousePhoto}
+                      hint="Shown to customers browsing storage"
+                    />
+                  </div>
+
+                  <div className="space-y-3 rounded-xl bg-slate-50 p-3">
+                    <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
+                      Warehouse Verification Documents (Admin Approval Required)
+                    </p>
+                    {warehouseDocs.map((d) => (
+                      <FileUpload
+                        key={d.key}
+                        label={d.label}
+                        required
+                        accept={d.accept || 'image/*'}
+                        value={docs[d.key] || null}
+                        onChange={(f) => setDocs((p) => ({ ...p, [d.key]: f }))}
+                      />
+                    ))}
+                  </div>
+                </>
               )}
 
               <ErrorMsg>{err}</ErrorMsg>
@@ -340,8 +547,9 @@ export function Register() {
 
 /* ===================== Role selection ===================== */
 const roles = [
-  { id: 'customer', icon: Home, title: 'Customer', sub: 'I want to move', to: '/customer' },
-  { id: 'mover', icon: Truck, title: 'Mover', sub: 'I provide services', to: '/mover' },
+  { id: 'customer', icon: Home, title: 'Customer', sub: 'I want to move or store items', to: '/customer' },
+  { id: 'mover', icon: Truck, title: 'Mover', sub: 'I provide moving & transport', to: '/mover' },
+  { id: 'warehouse', icon: Warehouse, title: 'Warehouse Partner', sub: 'I offer secure storage space', to: '/warehouse' },
 ]
 
 export function RoleSelect() {
@@ -437,6 +645,10 @@ export function Login() {
       })
       if (error) throw error
       const p = await getProfile(data.user.id)
+      if (p?.is_banned) {
+        await supabase.auth.signOut()
+        throw new Error('Your account has been suspended by SmartShift Administration.')
+      }
       const r = p?.role || role // account role wins over the picked one
       setRole(r)
       nav(homeFor(r))
@@ -512,10 +724,11 @@ export function Login() {
           </Link>
         </Item>
 
-        <Item className="mt-4 flex justify-center gap-2">
+        <Item className="mt-4 flex flex-wrap justify-center gap-2">
           {[
-            ['customer', 'Customer Login', User],
-            ['mover', 'Mover Portal', Truck],
+            ['customer', 'Customer', User],
+            ['mover', 'Mover', Truck],
+            ['warehouse', 'Warehouse', Warehouse],
           ].map(([id, label, Icon]) => {
             const active = role === id
             return (

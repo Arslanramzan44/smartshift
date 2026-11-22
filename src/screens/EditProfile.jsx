@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import { useNavigate, Navigate } from 'react-router-dom'
-import { Loader2, Check } from 'lucide-react'
+import { useNavigate, Navigate, Link } from 'react-router-dom'
+import { Loader2, Check, Warehouse, ChevronRight } from 'lucide-react'
 import { Button, Field, FileUpload, Card, Stagger, Item } from '../components/ui'
 import { TopBar } from '../components/nav'
 import { ErrorMsg } from './Auth'
@@ -17,7 +17,7 @@ const moverDocs = [
 export default function EditProfile() {
   const nav = useNavigate()
   const { user, profile, loading, refreshProfile } = useAuth()
-  const [form, setForm] = useState({ full_name: '', phone: '' })
+  const [form, setForm] = useState({ full_name: '', phone: '', vehicle_type: '', vehicle_plate: '' })
   const [avatar, setAvatar] = useState(null)
   const [docs, setDocs] = useState({}) // key -> new File
   const [err, setErr] = useState('')
@@ -25,11 +25,19 @@ export default function EditProfile() {
   const [saved, setSaved] = useState(false)
 
   useEffect(() => {
-    if (profile) setForm({ full_name: profile.full_name || '', phone: profile.phone || '' })
+    if (profile) {
+      setForm({
+        full_name: profile.full_name || '',
+        phone: profile.phone || '',
+        vehicle_type: profile.vehicle_type || 'Mini Truck',
+        vehicle_plate: profile.vehicle_plate || '',
+      })
+    }
   }, [profile])
 
   if (!loading && !user) return <Navigate to="/login" replace />
   const isMover = profile?.role === 'mover'
+  const isWarehouse = profile?.role === 'warehouse'
 
   async function submit(e) {
     e.preventDefault()
@@ -38,8 +46,6 @@ export default function EditProfile() {
     if (!form.full_name.trim()) return setErr('Full name is required.')
     setBusy(true)
     try {
-      // Spread the existing profile so not-null columns (role, email, …) are
-      // carried through the upsert; only name/phone (and files) change.
       const update = {
         ...profile,
         id: user.id,
@@ -48,8 +54,18 @@ export default function EditProfile() {
       }
       if (avatar) update.avatar_url = await uploadFile('avatars', user.id, avatar, 'avatar')
       if (isMover) {
+        update.vehicle_type = form.vehicle_type || 'Mini Truck'
+        update.vehicle_plate = form.vehicle_plate.trim() || null
+        let uploadedNewDoc = false
         for (const d of moverDocs) {
-          if (docs[d.key]) update[d.key] = await uploadFile('mover-docs', user.id, docs[d.key], d.prefix)
+          if (docs[d.key]) {
+            update[d.key] = await uploadFile('mover-docs', user.id, docs[d.key], d.prefix)
+            uploadedNewDoc = true
+          }
+        }
+        if (uploadedNewDoc && profile?.verification_status === 'rejected') {
+          update.verification_status = 'pending'
+          update.verification_notes = null
         }
       }
       await upsertProfile(update)
@@ -88,19 +104,49 @@ export default function EditProfile() {
               <Field label="Phone Number" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} placeholder="+92 300 0000000" />
 
               {isMover && (
-                <div className="space-y-3 rounded-xl bg-slate-50 p-3">
-                  <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Documents (re-upload to replace)</p>
-                  {moverDocs.map((d) => (
-                    <FileUpload
-                      key={d.key}
-                      label={d.label}
-                      accept={d.key === 'police_clearance_url' ? 'image/*,application/pdf' : 'image/*'}
-                      value={docs[d.key] || null}
-                      onChange={(f) => setDocs((p) => ({ ...p, [d.key]: f }))}
-                      hint={profile?.[d.key] ? 'Uploaded' : 'Not uploaded'}
-                    />
-                  ))}
-                </div>
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <span className="mb-1.5 block text-xs font-semibold text-slate-500">Vehicle Type</span>
+                      <select
+                        value={form.vehicle_type}
+                        onChange={(e) => setForm((f) => ({ ...f, vehicle_type: e.target.value }))}
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-ink outline-none focus:border-brand-400"
+                      >
+                        {['Van', 'Pickup', 'Mini Truck', 'Large Truck', 'Mazda Titan (3 Ton)'].map((v) => (
+                          <option key={v} value={v}>{v}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <Field label="License Plate" value={form.vehicle_plate} onChange={(e) => setForm((f) => ({ ...f, vehicle_plate: e.target.value }))} placeholder="LEA-8492" />
+                  </div>
+
+                  <div className="space-y-3 rounded-xl bg-slate-50 p-3">
+                    <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Documents (re-upload to replace)</p>
+                    {moverDocs.map((d) => (
+                      <FileUpload
+                        key={d.key}
+                        label={d.label}
+                        accept={d.key === 'police_clearance_url' ? 'image/*,application/pdf' : 'image/*'}
+                        value={docs[d.key] || null}
+                        onChange={(f) => setDocs((p) => ({ ...p, [d.key]: f }))}
+                        hint={profile?.[d.key] ? 'Uploaded' : 'Not uploaded'}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {isWarehouse && (
+                <Link
+                  to="/warehouse/facility"
+                  className="flex items-center justify-between rounded-xl border border-brand-200 bg-brand-50/60 p-3.5 text-xs font-bold text-brand-700"
+                >
+                  <span className="flex items-center gap-2">
+                    <Warehouse className="h-4 w-4" /> Manage Warehouse Facility & Compliance Docs
+                  </span>
+                  <ChevronRight className="h-4 w-4" />
+                </Link>
               )}
 
               <ErrorMsg>{err}</ErrorMsg>

@@ -1,12 +1,16 @@
-import { supabase } from './supabase'
+import {
+  createCustomerStorageBooking,
+  listCustomerStorageBookings,
+  listApprovedWarehouses,
+} from './warehouse'
 
-// Warehouse storage reservations. Backed by the `storage_bookings` table
-// (see SUPABASE_SETUP.md for the schema + RLS policy).
+// Warehouse storage reservations. Backed by `warehouses`, `storage_bookings`,
+// and `warehouse_tracking_logs`.
 
 export const STORAGE_UNITS = [
-  { id: 'small', name: 'Small Unit', cap: '5 m³ · ~1 room', rate: 200 },
-  { id: 'medium', name: 'Medium Unit', cap: '15 m³ · ~2–3 rooms', rate: 450 },
-  { id: 'large', name: 'Large Unit', cap: '40 m³ · house / office', rate: 900 },
+  { id: 'small', name: 'Small Unit', cap: '5 m³ · ~1 room', rate: 200, rateField: 'small_rate_daily', availField: 'small_units_available' },
+  { id: 'medium', name: 'Medium Unit', cap: '15 m³ · ~2–3 rooms', rate: 450, rateField: 'medium_rate_daily', availField: 'medium_units_available' },
+  { id: 'large', name: 'Large Unit', cap: '40 m³ · house / office', rate: 900, rateField: 'large_rate_daily', availField: 'large_units_available' },
 ]
 
 export const STORAGE_DURATIONS = [
@@ -17,28 +21,30 @@ export const STORAGE_DURATIONS = [
 ]
 
 export const WAREHOUSES = [
-  'Lahore · Gulberg Hub',
-  'Karachi · Korangi Hub',
-  'Islamabad · I-9 Hub',
+  'SmartShift Gulberg Climate Hub',
+  'SmartShift Johar Town Vault',
+  'SmartShift Islamabad I-9 Hub',
 ]
 
-export function storagePrice(unitId, days) {
+export function unitRateForWarehouse(unitId, warehouseObj = null) {
   const u = STORAGE_UNITS.find((x) => x.id === unitId)
-  return u ? u.rate * days : 0
+  if (!u) return 0
+  if (warehouseObj && warehouseObj[u.rateField] != null) {
+    return Number(warehouseObj[u.rateField])
+  }
+  return u.rate
+}
+
+export function storagePrice(unitId, days, warehouseObj = null) {
+  return unitRateForWarehouse(unitId, warehouseObj) * Number(days || 0)
 }
 
 export async function createStorageBooking(row) {
-  const { data, error } = await supabase.from('storage_bookings').insert(row).select().single()
-  if (error) throw error
-  return data
+  return createCustomerStorageBooking(row)
 }
 
 export async function listStorageBookings(customerId) {
-  const { data, error } = await supabase
-    .from('storage_bookings')
-    .select('*')
-    .eq('customer_id', customerId)
-    .order('created_at', { ascending: false })
-  if (error) throw error
-  return data
+  return listCustomerStorageBookings(customerId)
 }
+
+export { listApprovedWarehouses }

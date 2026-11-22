@@ -84,6 +84,10 @@ export function RouteMap({ pickup, dropoff, className = '', dark = false, onInfo
               duration: leg.duration?.text,
               // numeric km (meters / 1000) used for distance-based pricing
               km: leg.distance?.value ? leg.distance.value / 1000 : null,
+              pickupLat: leg.start_location?.lat?.() ?? null,
+              pickupLng: leg.start_location?.lng?.() ?? null,
+              dropoffLat: leg.end_location?.lat?.() ?? null,
+              dropoffLng: leg.end_location?.lng?.() ?? null,
             })
         }
       },
@@ -111,7 +115,7 @@ export function RouteMap({ pickup, dropoff, className = '', dark = false, onInfo
    PlacesField — text input with Google Places Autocomplete. Styled to match
    the app's Field. Controlled value; reports the selected/typed address.
 ---------------------------------------------------------------------------- */
-export function PlacesField({ value, onChange, placeholder, icon: Icon, trailing }) {
+export function PlacesField({ value, onChange, onPlace, placeholder, icon: Icon, trailing }) {
   const { maps } = useMaps()
   const inputRef = useRef(null)
 
@@ -124,6 +128,13 @@ export function PlacesField({ value, onChange, placeholder, icon: Icon, trailing
       const p = ac.getPlace()
       const text = p.formatted_address || p.name
       if (text) onChange(text)
+      if (onPlace && p.geometry?.location) {
+        onPlace({
+          address: text,
+          lat: p.geometry.location.lat(),
+          lng: p.geometry.location.lng(),
+        })
+      }
     })
     return () => listener.remove()
   }, [maps]) // eslint-disable-line react-hooks/exhaustive-deps

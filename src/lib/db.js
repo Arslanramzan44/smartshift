@@ -1,25 +1,28 @@
 import { supabase } from './supabase'
 
+const PUBLIC_BUCKETS = ['avatars', 'warehouse-photos']
+
 // Upload a file into "<userId>/<label>-<timestamp>.<ext>" inside a bucket.
-// Returns the public URL for the public "avatars" bucket, else the storage path.
+// Returns the public URL for public buckets, else the storage path.
 export async function uploadFile(bucket, userId, file, label) {
-  const ext = file.name.split('.').pop()
+  const ext = (file.name?.split('.').pop() || 'jpg').toLowerCase()
   const path = `${userId}/${label}-${Date.now()}.${ext}`
   const { error } = await supabase.storage.from(bucket).upload(path, file, {
     upsert: true,
-    contentType: file.type,
+    contentType: file.type || 'application/octet-stream',
   })
   if (error) throw error
-  if (bucket === 'avatars') {
-    return supabase.storage.from('avatars').getPublicUrl(path).data.publicUrl
+  if (PUBLIC_BUCKETS.includes(bucket)) {
+    return supabase.storage.from(bucket).getPublicUrl(path).data.publicUrl
   }
   return path
 }
 
-// Signed URL for private mover-docs files (valid 1 hour).
-export async function signedUrl(path, expiresIn = 3600) {
+// Signed URL for private mover-docs or warehouse-docs files (valid 1 hour).
+export async function signedUrl(path, expiresIn = 3600, bucket = 'mover-docs') {
   if (!path) return null
-  const { data, error } = await supabase.storage.from('mover-docs').createSignedUrl(path, expiresIn)
+  if (path.startsWith('http://') || path.startsWith('https://')) return path
+  const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, expiresIn)
   if (error) return null
   return data.signedUrl
 }

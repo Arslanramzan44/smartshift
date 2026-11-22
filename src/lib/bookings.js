@@ -30,8 +30,6 @@ export function nextStatus(status) {
 }
 
 // ---------- proof-of-delivery handshake ----------
-// Customer shows this QR at drop-off; mover scans it to confirm delivery.
-// The booking id is the shared secret carried over the physical scan.
 export const DELIVERY_PREFIX = 'SMARTSHIFT:DELIVERY:'
 export const deliveryPayload = (id) => `${DELIVERY_PREFIX}${id}`
 export function matchesDelivery(text, id) {
@@ -114,10 +112,9 @@ export async function getBookingItems(bookingId) {
 // ---------- mover actions ----------
 // Atomically claim an unassigned pending job. Returns the row, or null if taken.
 export async function acceptJob(bookingId, moverId) {
-  // Enforce driver approval: no driver can pick request of customer before admin approval
   const { data: prof, error: pErr } = await supabase
     .from('profiles')
-    .select('verification_status, is_banned')
+    .select('full_name, phone, verification_status, is_banned, driver_lat, driver_lng')
     .eq('id', moverId)
     .single()
 
@@ -125,13 +122,26 @@ export async function acceptJob(bookingId, moverId) {
   if (prof?.is_banned) {
     throw new Error('Your driver account has been suspended by the Admin. Please contact support.')
   }
-  if (prof && prof.verification_status !== 'approved') {
+  if (!prof || prof.verification_status !== 'approved') {
     throw new Error('Verification Required: Your driving license and police certification are awaiting admin approval before you can accept customer requests.')
+  }
+
+  const patch = {
+    mover_id: moverId,
+    mover_name: prof.full_name || null,
+    mover_phone: prof.phone || null,
+    status: 'accepted',
+    accepted_at: new Date().toISOString(),
+  }
+  if (prof.driver_lat && prof.driver_lng) {
+    patch.driver_lat = prof.driver_lat
+    patch.driver_lng = prof.driver_lng
+    patch.last_location_at = new Date().toISOString()
   }
 
   const { data, error } = await supabase
     .from('bookings')
-    .update({ mover_id: moverId, status: 'accepted', accepted_at: new Date().toISOString() })
+    .update(patch)
     .eq('id', bookingId)
     .eq('status', 'pending')
     .is('mover_id', null)
@@ -140,14 +150,33 @@ export async function acceptJob(bookingId, moverId) {
   return data?.[0] ?? null
 }
 
-export async function updateDriverLocation(moverId, bookingId, lat, lng) {
+export async function setDriverOnlineStatus(moverId, isOnline) {
+  try {
+    await supabase
+      .from('profiles')
+      .update({ is_online: isOnline, last_active_at: new Date().toISOString() })
+      .eq('id', moverId)
+  } catch (err) {
+    console.warn('Could not update driver online state:', err)
+  }
+}
+
+export async function updateDriverLocation(moverId, bookingId, lat, lng, telemetry = {}) {
   try {
     const now = new Date().toISOString()
-    // Update mover profile coordinates
-    await supabase.from('profiles').update({ driver_lat: lat, driver_lng: lng, last_active_at: now }).eq('id', moverId)
-    // Update booking live driver coordinates if active
+    await supabase
+      .from('profiles')
+      .update({ driver_lat: lat, driver_lng: lng, is_online: true, last_active_at: now })
+      .eq('id', moverId)
     if (bookingId) {
-      await supabase.from('bookings').update({ driver_lat: lat, driver_lng: lng }).eq('id', bookingId)
+      const patch = {
+        driver_lat: lat,
+        driver_lng: lng,
+        last_location_at: now,
+      }
+      if (telemetry.speed != null) patch.driver_speed_kmh = telemetry.speed
+      if (telemetry.heading != null) patch.driver_heading = telemetry.heading
+      await supabase.from('bookings').update(patch).eq('id', bookingId)
     }
   } catch (err) {
     console.warn('Failed to update driver coordinates:', err)
@@ -168,13 +197,9 @@ export async function setStatus(bookingId, status) {
 }
 
 // ---------- customer actions ----------
-// A move can only be called off before it's physically underway: while still
-// pending, or after a mover accepts but before they head to pickup.
 export const CANCELLABLE = ['pending', 'accepted']
 export const canCancel = (status) => CANCELLABLE.includes(status)
 
-// Cancel a booking. The status guard makes this a no-op (null) if the move has
-// already advanced past 'accepted' — e.g. a mover started en route concurrently.
 export async function cancelBooking(bookingId) {
   const { data, error } = await supabase
     .from('bookings')
@@ -193,7 +218,6 @@ export async function createReview(review) {
   return data
 }
 
-// Existing review for a booking, or null. Used to block double-rating.
 export async function getReviewForBooking(bookingId) {
   const { data, error } = await supabase
     .from('reviews')

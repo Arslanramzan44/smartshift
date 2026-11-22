@@ -30,9 +30,18 @@ import {
   MoverDocuments,
   MoverNotifications,
 } from './screens/Mover'
+import {
+  WarehouseDashboard,
+  WarehouseBookings,
+  WarehouseBookingDetail,
+  WarehouseTracking,
+  WarehouseFacility,
+  WarehouseProfile,
+} from './screens/Warehouse'
 import { Dashboard as AdminDashboard } from '../admin/src/pages/Dashboard'
 import { DriverApprovals as AdminApprovals } from '../admin/src/pages/DriverApprovals'
 import { Drivers as AdminDrivers } from '../admin/src/pages/Drivers'
+import { WarehousesPage as AdminWarehouses } from '../admin/src/pages/Warehouses'
 import { UsersPage as AdminUsers } from '../admin/src/pages/Users'
 import { RidesPage as AdminRides } from '../admin/src/pages/Rides'
 import { LiveTrackingPage as AdminLiveTracking } from '../admin/src/pages/LiveTracking'
@@ -63,6 +72,11 @@ const SCREENS = [
   ['Mover · Earnings', '/mover/earnings'],
   ['Mover · Documents', '/mover/documents'],
   ['Mover · Alerts', '/mover/notifications'],
+  ['Warehouse · Home', '/warehouse'],
+  ['Warehouse · Requests', '/warehouse/bookings'],
+  ['Warehouse · Live Tracking', '/warehouse/tracking'],
+  ['Warehouse · Facility & Docs', '/warehouse/facility'],
+  ['Warehouse · Profile', '/warehouse/profile'],
   ['Admin · Control Center', '/admin'],
 ]
 
@@ -80,15 +94,14 @@ function Page({ children }) {
   )
 }
 
-// Gate role-specific screens. Requires an authenticated session and the
-// matching role, so a customer never lands on mover data and vice-versa.
+// Gate role-specific screens so customer, mover, and warehouse views never mix.
 function RoleGuard({ role, children }) {
   const { user, profile, loading } = useAuth()
   if (loading) return null
   if (!user) return <Navigate to="/login" replace />
   const current = profile?.role || getRole()
   if (!current) return <Navigate to="/role" replace />
-  if (current !== role) return <Navigate to={current === 'mover' ? '/mover' : '/customer'} replace />
+  if (current !== role) return <Navigate to={homeFor(current)} replace />
   return children
 }
 
@@ -100,8 +113,6 @@ function AuthGuard({ children }) {
   return children
 }
 
-// Root route. A logged-in user skips onboarding and goes straight to their
-// home; only logged-out users see the onboarding carousel.
 function RootGate() {
   const { user, profile, loading } = useAuth()
   if (loading) return null
@@ -146,10 +157,19 @@ function AnimatedRoutes() {
         <Route path="/mover/documents" element={<RoleGuard role="mover"><Page><MoverDocuments /></Page></RoleGuard>} />
         <Route path="/mover/notifications" element={<RoleGuard role="mover"><Page><MoverNotifications /></Page></RoleGuard>} />
 
+        {/* SmartShift Warehouse Partner Routes */}
+        <Route path="/warehouse" element={<RoleGuard role="warehouse"><Page><WarehouseDashboard /></Page></RoleGuard>} />
+        <Route path="/warehouse/bookings" element={<RoleGuard role="warehouse"><Page><WarehouseBookings /></Page></RoleGuard>} />
+        <Route path="/warehouse/booking/:id" element={<RoleGuard role="warehouse"><Page><WarehouseBookingDetail /></Page></RoleGuard>} />
+        <Route path="/warehouse/tracking" element={<RoleGuard role="warehouse"><Page><WarehouseTracking /></Page></RoleGuard>} />
+        <Route path="/warehouse/facility" element={<RoleGuard role="warehouse"><Page><WarehouseFacility /></Page></RoleGuard>} />
+        <Route path="/warehouse/profile" element={<RoleGuard role="warehouse"><Page><WarehouseProfile /></Page></RoleGuard>} />
+
         {/* SmartShift Admin Control Panel Routes */}
         <Route path="/admin" element={<AdminLayout><AdminDashboard /></AdminLayout>} />
         <Route path="/admin/approvals" element={<AdminLayout><AdminApprovals /></AdminLayout>} />
         <Route path="/admin/drivers" element={<AdminLayout><AdminDrivers /></AdminLayout>} />
+        <Route path="/admin/warehouses" element={<AdminLayout><AdminWarehouses /></AdminLayout>} />
         <Route path="/admin/users" element={<AdminLayout><AdminUsers /></AdminLayout>} />
         <Route path="/admin/rides" element={<AdminLayout><AdminRides /></AdminLayout>} />
         <Route path="/admin/live-map" element={<AdminLayout><AdminLiveTracking /></AdminLayout>} />
@@ -197,7 +217,6 @@ function ScreenLauncher() {
                 </button>
               </div>
 
-              {/* Admin Panel Direct Shortcut */}
               <Link
                 to="/admin"
                 onClick={() => setOpen(false)}
@@ -236,7 +255,6 @@ export default function App() {
   const location = useLocation()
   const isAdmin = location.pathname.startsWith('/admin')
 
-  // Android hardware back button: navigate back, or exit at the root.
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return
     let handle
@@ -250,7 +268,7 @@ export default function App() {
   }, [])
 
   return (
-    <div className={isAdmin ? "w-full min-h-screen bg-[#090d16]" : "mx-auto min-h-screen w-full max-w-md bg-slate-50 shadow-sm sm:max-w-lg"}>
+    <div className={isAdmin ? 'w-full min-h-screen bg-[#090d16]' : 'mx-auto min-h-screen w-full max-w-md bg-slate-50 shadow-sm sm:max-w-lg'}>
       <AnimatedRoutes />
       {!isAdmin && <ScreenLauncher />}
     </div>

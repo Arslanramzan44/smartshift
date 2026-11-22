@@ -3,6 +3,7 @@ import { AdminLayout } from './components/AdminLayout'
 import { Dashboard } from './pages/Dashboard'
 import { DriverApprovals } from './pages/DriverApprovals'
 import { Drivers } from './pages/Drivers'
+import { WarehousesPage } from './pages/Warehouses'
 import { UsersPage } from './pages/Users'
 import { RidesPage } from './pages/Rides'
 import { LiveTrackingPage } from './pages/LiveTracking'
@@ -15,6 +16,7 @@ export default function App() {
         <Route path="/" element={<Dashboard />} />
         <Route path="/approvals" element={<DriverApprovals />} />
         <Route path="/drivers" element={<Drivers />} />
+        <Route path="/warehouses" element={<WarehousesPage />} />
         <Route path="/users" element={<UsersPage />} />
         <Route path="/rides" element={<RidesPage />} />
         <Route path="/live-map" element={<LiveTrackingPage />} />

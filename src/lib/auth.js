@@ -1,9 +1,9 @@
 // Lightweight role/session store backed by localStorage.
-// Keeps customer and mover experiences isolated so data never mixes.
+// Keeps customer, mover, warehouse, and admin experiences cleanly routed.
 
 const ROLE_KEY = 'smartshift.role'
 
-export const ROLES = ['customer', 'mover']
+export const ROLES = ['customer', 'mover', 'warehouse', 'admin']
 
 export function setRole(role) {
   if (!ROLES.includes(role)) return
@@ -21,5 +21,8 @@ export function clearRole() {
 
 // Home path for a given (or current) role.
 export function homeFor(role = getRole()) {
-  return role === 'mover' ? '/mover' : '/customer'
+  if (role === 'mover') return '/mover'
+  if (role === 'warehouse') return '/warehouse'
+  if (role === 'admin') return '/admin'
+  return '/customer'
 }

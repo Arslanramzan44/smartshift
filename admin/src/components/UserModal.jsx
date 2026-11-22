@@ -2,12 +2,12 @@ import { useState } from 'react'
 import {
   X,
   User,
-  ShieldAlert,
-  ShieldCheck,
   Mail,
   Phone,
   Calendar,
   Truck,
+  Warehouse,
+  Package,
   CheckCircle,
   Ban,
 } from 'lucide-react'
@@ -22,7 +22,7 @@ export function UserModal({ user, onClose, onUpdated }) {
   async function handleToggleBan() {
     const nextBan = !isBanned
     const action = nextBan ? 'BAN' : 'UNBAN'
-    if (!confirm(`Are you sure you want to ${action} user ${user.full_name}?`)) return
+    if (!confirm(`Are you sure you want to ${action} user ${user.full_name || user.email}?`)) return
 
     setBusy(true)
     try {
@@ -39,29 +39,25 @@ export function UserModal({ user, onClose, onUpdated }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
       <div className="relative w-full max-w-lg rounded-3xl border border-slate-700/80 bg-slate-900 shadow-2xl overflow-hidden">
-        {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-800 bg-slate-950/80 px-6 py-4">
           <div className="flex items-center gap-3">
             <span className="grid h-10 w-10 place-items-center rounded-xl bg-brand-500/20 text-brand-400 border border-brand-500/30">
               <User className="h-5 w-5" />
             </span>
             <div>
-              <h2 className="text-base font-bold text-white flex items-center gap-2">
-                User Profile Dossier
-              </h2>
-              <p className="text-xs text-slate-400">Account details and administrative access controls</p>
+              <h2 className="text-base font-bold text-white">User Profile Dossier</h2>
+              <p className="text-xs text-slate-400">Account activity and administrative controls</p>
             </div>
           </div>
 
           <button
             onClick={onClose}
-            className="grid h-9 w-9 place-items-center rounded-xl bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 transition"
+            className="grid h-9 w-9 place-items-center rounded-xl bg-slate-800 text-slate-400 hover:text-white"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        {/* Content */}
         <div className="p-6 space-y-5">
           <div className="flex items-center gap-4">
             <img
@@ -70,8 +66,8 @@ export function UserModal({ user, onClose, onUpdated }) {
               alt=""
             />
             <div>
-              <h3 className="font-extrabold text-lg text-white">{user.full_name || 'Anonymous User'}</h3>
-              <div className="flex items-center gap-2 mt-1">
+              <h3 className="font-extrabold text-lg text-white">{user.full_name || 'SmartShift User'}</h3>
+              <div className="flex flex-wrap items-center gap-2 mt-1">
                 <span className="rounded-md bg-brand-500/20 px-2 py-0.5 text-xs font-bold text-brand-400 uppercase">
                   {user.role}
                 </span>
@@ -88,41 +84,57 @@ export function UserModal({ user, onClose, onUpdated }) {
             </div>
           </div>
 
+          {/* Metrics Row */}
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+              <p className="text-[10px] uppercase font-bold text-slate-500">Moves</p>
+              <p className="text-base font-black text-white mt-0.5">{user.total_moves || 0}</p>
+            </div>
+            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+              <p className="text-[10px] uppercase font-bold text-slate-500">Storage Units</p>
+              <p className="text-base font-black text-purple-300 mt-0.5">{user.storage_bookings_count || 0}</p>
+            </div>
+            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+              <p className="text-[10px] uppercase font-bold text-slate-500">Volume</p>
+              <p className="text-sm font-black text-emerald-400 mt-0.5">
+                Rs. {Number(user.total_spent || 0).toLocaleString()}
+              </p>
+            </div>
+          </div>
+
           <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4 space-y-2.5 text-xs text-slate-300">
             <p className="flex items-center justify-between">
-              <span className="text-slate-500 flex items-center gap-2">
-                <Mail className="h-4 w-4" /> Email Address:
-              </span>
+              <span className="text-slate-500 flex items-center gap-2"><Mail className="h-4 w-4" /> Email:</span>
               <span className="font-semibold text-white">{user.email || '—'}</span>
             </p>
             <p className="flex items-center justify-between">
-              <span className="text-slate-500 flex items-center gap-2">
-                <Phone className="h-4 w-4" /> Phone Number:
-              </span>
+              <span className="text-slate-500 flex items-center gap-2"><Phone className="h-4 w-4" /> Phone:</span>
               <span className="font-semibold text-white">{user.phone || '—'}</span>
             </p>
             <p className="flex items-center justify-between">
-              <span className="text-slate-500 flex items-center gap-2">
-                <Calendar className="h-4 w-4" /> Joined Platform:
-              </span>
+              <span className="text-slate-500 flex items-center gap-2"><Calendar className="h-4 w-4" /> Joined:</span>
               <span className="font-semibold text-white">
-                {new Date(user.created_at || Date.now()).toLocaleDateString()}
+                {user.created_at ? new Date(user.created_at).toLocaleDateString() : '—'}
               </span>
             </p>
-            {user.role === 'mover' && (
+            {(user.role === 'mover' || user.role === 'warehouse') && (
               <p className="flex items-center justify-between">
                 <span className="text-slate-500 flex items-center gap-2">
-                  <Truck className="h-4 w-4" /> Verification Status:
+                  {user.role === 'warehouse' ? <Warehouse className="h-4 w-4" /> : <Truck className="h-4 w-4" />}
+                  Verification:
                 </span>
-                <span className="font-semibold text-amber-400 uppercase">
-                  {user.verification_status || 'Pending'}
-                </span>
+                <span className="font-semibold text-amber-400 uppercase">{user.verification_status || 'Pending'}</span>
+              </p>
+            )}
+            {user.primary_warehouse && (
+              <p className="flex items-center justify-between">
+                <span className="text-slate-500 flex items-center gap-2"><Package className="h-4 w-4" /> Warehouse:</span>
+                <span className="font-semibold text-purple-300">{user.primary_warehouse.name}</span>
               </p>
             )}
           </div>
 
-          {/* Action Button */}
-          <div className="pt-2">
+          {user.role !== 'admin' && (
             <button
               onClick={handleToggleBan}
               disabled={busy}
@@ -142,7 +154,7 @@ export function UserModal({ user, onClose, onUpdated }) {
                 </>
               )}
             </button>
-          </div>
+          )}
         </div>
       </div>
     </div>

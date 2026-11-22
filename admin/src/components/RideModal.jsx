@@ -7,13 +7,7 @@ import {
   Truck,
   User,
   Phone,
-  Calendar,
-  CheckCircle2,
-  XCircle,
-  AlertCircle,
   QrCode,
-  DollarSign,
-  UserCheck,
 } from 'lucide-react'
 import { updateBookingStatus, reassignBookingDriver, cancelBookingAdmin } from '../lib/adminData'
 
@@ -26,14 +20,14 @@ export function RideModal({ ride, allDrivers = [], onClose, onUpdated }) {
 
   if (!ride) return null
 
-  const approvedDrivers = allDrivers.filter((d) => d.verification_status === 'approved')
+  const approvedDrivers = allDrivers.filter((d) => d.verification_status === 'approved' && !d.is_banned)
 
   async function handleStatusChange(newStatus) {
-    setStatus(newStatus)
     setBusy(true)
     try {
       const updated = await updateBookingStatus(ride.id, newStatus)
-      if (onUpdated) onUpdated(updated)
+      setStatus(newStatus)
+      if (onUpdated && updated) onUpdated(updated)
     } catch (err) {
       alert('Error updating ride status: ' + err.message)
     } finally {
@@ -42,18 +36,22 @@ export function RideModal({ ride, allDrivers = [], onClose, onUpdated }) {
   }
 
   async function handleReassign() {
-    if (!selectedDriverId) return
     const chosenDriver = allDrivers.find((d) => d.id === selectedDriverId)
     setBusy(true)
     try {
-      await reassignBookingDriver(
+      const updated = await reassignBookingDriver(
         ride.id,
-        selectedDriverId,
-        chosenDriver?.full_name || 'Driver',
+        selectedDriverId || null,
+        chosenDriver?.full_name || null,
         chosenDriver?.phone || null
       )
-      if (onUpdated) onUpdated({ ...ride, mover_id: selectedDriverId, mover_name: chosenDriver?.full_name })
-      alert(`Ride successfully assigned to driver ${chosenDriver?.full_name}`)
+      if (updated) setStatus(updated.status)
+      if (onUpdated && updated) onUpdated(updated)
+      alert(
+        chosenDriver
+          ? `Ride successfully assigned to ${chosenDriver.full_name}`
+          : 'Ride returned to unassigned pool.'
+      )
     } catch (err) {
       alert('Error reassigning driver: ' + err.message)
     } finally {
@@ -68,8 +66,8 @@ export function RideModal({ ride, allDrivers = [], onClose, onUpdated }) {
     }
     setBusy(true)
     try {
-      await cancelBookingAdmin(ride.id, cancelReason.trim())
-      if (onUpdated) onUpdated({ ...ride, status: 'cancelled', cancellation_reason: cancelReason.trim() })
+      const updated = await cancelBookingAdmin(ride.id, cancelReason.trim())
+      if (onUpdated && updated) onUpdated(updated)
       onClose()
     } catch (err) {
       alert('Error cancelling booking: ' + err.message)
@@ -92,17 +90,16 @@ export function RideModal({ ride, allDrivers = [], onClose, onUpdated }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 overflow-y-auto">
       <div className="relative w-full max-w-2xl rounded-3xl border border-slate-700/80 bg-slate-900 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-        {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-800 bg-slate-950/80 px-6 py-4">
           <div className="flex items-center gap-3">
             <span className="grid h-10 w-10 place-items-center rounded-xl bg-brand-500/20 text-brand-400 border border-brand-500/30">
               <Package className="h-5 w-5" />
             </span>
             <div>
-              <h2 className="text-base font-bold text-white flex items-center gap-2">
+              <h2 className="text-base font-bold text-white">
                 Booking Details · #{String(ride.id).slice(0, 8)}
               </h2>
-              <p className="text-xs text-slate-400">Complete route, customer, and driver controls</p>
+              <p className="text-xs text-slate-400">Complete route, customer, inventory, and driver controls</p>
             </div>
           </div>
 
@@ -114,9 +111,8 @@ export function RideModal({ ride, allDrivers = [], onClose, onUpdated }) {
           </button>
         </div>
 
-        {/* Content */}
         <div className="p-6 overflow-y-auto space-y-5">
-          {/* Status Override Banner */}
+          {/* Status Override */}
           <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
             <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">
               Ride Status (Admin Control)
@@ -142,7 +138,7 @@ export function RideModal({ ride, allDrivers = [], onClose, onUpdated }) {
             </div>
           </div>
 
-          {/* Route Section */}
+          {/* Route */}
           <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4 space-y-3">
             <div className="flex items-start gap-3">
               <span className="grid h-7 w-7 place-items-center rounded-lg bg-emerald-500/20 text-emerald-400 shrink-0">
@@ -165,9 +161,8 @@ export function RideModal({ ride, allDrivers = [], onClose, onUpdated }) {
             </div>
           </div>
 
-          {/* Customer & Assigned Driver Split */}
+          {/* Customer & Driver Assignment */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Customer */}
             <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4 space-y-2">
               <p className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
                 <User className="h-4 w-4 text-brand-400" /> Customer
@@ -178,7 +173,6 @@ export function RideModal({ ride, allDrivers = [], onClose, onUpdated }) {
               </p>
             </div>
 
-            {/* Driver Assignment */}
             <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4 space-y-2">
               <p className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
                 <Truck className="h-4 w-4 text-emerald-400" /> Assigned Driver
@@ -192,35 +186,40 @@ export function RideModal({ ride, allDrivers = [], onClose, onUpdated }) {
                   <option value="">— Unassigned (Available in Pool) —</option>
                   {approvedDrivers.map((d) => (
                     <option key={d.id} value={d.id}>
-                      {d.full_name} ({d.vehicle_type || 'Driver'}) · Verified
+                      {d.full_name} ({d.vehicle_type}) · Verified
                     </option>
                   ))}
                 </select>
+                {approvedDrivers.length === 0 && (
+                  <p className="text-[10px] text-amber-400">
+                    Approve a driver in Approvals Desk first to assign them.
+                  </p>
+                )}
 
-                {selectedDriverId !== ride.mover_id && (
+                {selectedDriverId !== (ride.mover_id || '') && (
                   <button
                     onClick={handleReassign}
                     disabled={busy}
                     className="w-full rounded-xl bg-brand-600 hover:bg-brand-500 px-3 py-1.5 text-xs font-bold text-white transition shadow-sm"
                   >
-                    Confirm Reassignment
+                    Confirm Assignment
                   </button>
                 )}
               </div>
             </div>
           </div>
 
-          {/* Pricing & Vehicle Details */}
+          {/* Pricing & Vehicle */}
           <div className="grid grid-cols-3 gap-3">
             <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-3 text-center">
               <p className="text-[10px] font-bold uppercase text-slate-500">Price / Fare</p>
-              <p className="text-lg font-black text-emerald-400">Rs. {Number(ride.price).toLocaleString()}</p>
+              <p className="text-lg font-black text-emerald-400">Rs. {Number(ride.price || 0).toLocaleString()}</p>
               <p className="text-[10px] text-slate-400 uppercase">{ride.payment_method || 'COD'}</p>
             </div>
             <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-3 text-center">
               <p className="text-[10px] font-bold uppercase text-slate-500">Vehicle</p>
               <p className="text-xs font-bold text-white mt-1">{ride.vehicle || 'Standard'}</p>
-              <p className="text-[10px] text-slate-400">{ride.distance_km || 10} km</p>
+              <p className="text-[10px] text-slate-400">{ride.distance_km ? `${ride.distance_km} km` : '—'}</p>
             </div>
             <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-3 text-center">
               <p className="text-[10px] font-bold uppercase text-slate-500">Schedule</p>
@@ -228,13 +227,13 @@ export function RideModal({ ride, allDrivers = [], onClose, onUpdated }) {
             </div>
           </div>
 
-          {/* Inventory Items List with QR Codes */}
-          {ride.items && ride.items.length > 0 && (
-            <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
-              <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2.5 flex items-center justify-between">
-                <span>Inventory Items ({ride.items.length})</span>
-                <span className="text-slate-500 text-[10px]">QR Verification Status</span>
-              </p>
+          {/* Inventory Items */}
+          <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
+            <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2.5 flex items-center justify-between">
+              <span>Inventory Items ({ride.items?.length || 0})</span>
+              <span className="text-slate-500 text-[10px]">QR Verification Status</span>
+            </p>
+            {ride.items && ride.items.length > 0 ? (
               <div className="space-y-2">
                 {ride.items.map((it, idx) => (
                   <div
@@ -245,7 +244,7 @@ export function RideModal({ ride, allDrivers = [], onClose, onUpdated }) {
                       <QrCode className="h-4 w-4 text-brand-400" />
                       <div>
                         <p className="font-bold text-white">{it.name}</p>
-                        {it.tag && <p className="text-[10px] text-slate-400">{it.tag}</p>}
+                        <p className="text-[10px] text-slate-400">{it.qr_code || it.tag || 'Item'}</p>
                       </div>
                     </div>
 
@@ -261,18 +260,20 @@ export function RideModal({ ride, allDrivers = [], onClose, onUpdated }) {
                   </div>
                 ))}
               </div>
-            </div>
-          )}
+            ) : (
+              <p className="text-xs text-slate-500">No inventory items listed on this booking.</p>
+            )}
+          </div>
 
-          {/* Cancellation section */}
+          {/* Cancel Prompt */}
           {showCancelPrompt ? (
             <div className="rounded-2xl border border-rose-500/30 bg-rose-950/20 p-4 space-y-2">
-              <p className="text-xs font-bold text-rose-300">Cancellation Reason (Will be logged):</p>
+              <p className="text-xs font-bold text-rose-300">Cancellation Reason:</p>
               <input
                 type="text"
                 value={cancelReason}
                 onChange={(e) => setCancelReason(e.target.value)}
-                placeholder="e.g. Customer requested cancellation / No driver available"
+                placeholder="e.g. Customer requested cancellation"
                 className="w-full rounded-xl bg-slate-900 border border-slate-700 px-3 py-2 text-xs text-white"
               />
               <div className="flex justify-end gap-2 pt-1">
@@ -285,21 +286,23 @@ export function RideModal({ ride, allDrivers = [], onClose, onUpdated }) {
                 <button
                   onClick={handleCancel}
                   disabled={busy}
-                  className="px-4 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-xs font-bold text-white shadow-md"
+                  className="px-4 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-xs font-bold text-white"
                 >
                   Confirm Cancel Ride
                 </button>
               </div>
             </div>
           ) : (
-            <div className="flex justify-end pt-2">
-              <button
-                onClick={() => setShowCancelPrompt(true)}
-                className="text-xs font-bold text-rose-400 hover:text-rose-300 underline"
-              >
-                Cancel this Ride as Admin
-              </button>
-            </div>
+            status !== 'cancelled' && (
+              <div className="flex justify-end pt-2">
+                <button
+                  onClick={() => setShowCancelPrompt(true)}
+                  className="text-xs font-bold text-rose-400 hover:text-rose-300 underline"
+                >
+                  Cancel this Ride as Admin
+                </button>
+              </div>
+            )
           )}
         </div>
       </div>

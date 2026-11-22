@@ -35,6 +35,7 @@ import { TopBar, BottomNav } from '../components/nav'
 import { ratingTags, tipOptions, customerNotifications } from '../lib/data'
 import { useAuth } from '../lib/AuthContext'
 import { listCustomerBookings, getBooking, STATUS_LABEL, STATUS_FLOW, statusTone, deliveryPayload, createReview, getReviewForBooking, canCancel, cancelBooking } from '../lib/bookings'
+import { listStorageBookings } from '../lib/storage'
 import { getProfile } from '../lib/db'
 import { QRCodeSVG } from 'qrcode.react'
 import { ShieldCheck } from 'lucide-react'
@@ -101,15 +102,25 @@ function BookingCard({ m, isActive }) {
 export function CustomerDashboard() {
   const { user, profile } = useAuth()
   const [bookings, setBookings] = useState([])
+  const [storageList, setStorageList] = useState([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     if (!user) return
-    listCustomerBookings(user.id)
-      .then(setBookings)
-      .catch(() => {})
+    Promise.all([
+      listCustomerBookings(user.id).catch(() => []),
+      listStorageBookings(user.id).catch(() => []),
+    ])
+      .then(([b, s]) => {
+        setBookings(b)
+        setStorageList(s)
+      })
       .finally(() => setLoading(false))
   }, [user?.id])
+
+  const activeStorageCount = storageList.filter(
+    (s) => !['checked_out', 'cancelled'].includes(s.tracking_stage || s.status)
+  ).length
 
   const firstName = (profile?.full_name || 'there').split(' ')[0]
   const isActive = (s) => !['delivered', 'cancelled'].includes(s)
@@ -153,8 +164,17 @@ export function CustomerDashboard() {
                 <Warehouse className="h-6 w-6" />
               </span>
               <div className="flex-1">
-                <p className="text-sm font-bold text-ink">Need Storage?</p>
-                <p className="text-[11px] text-slate-400">Reserve a secure warehouse unit by the day, week, or month.</p>
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-bold text-ink">Warehouse Storage</p>
+                  {activeStorageCount > 0 && (
+                    <Badge tone="green">{activeStorageCount} Active</Badge>
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  {activeStorageCount > 0
+                    ? 'Track your stored units, QR pass, and climate updates live.'
+                    : 'Reserve an admin-verified warehouse unit with live tracking.'}
+                </p>
               </div>
               <ArrowRight className="h-4 w-4 text-slate-300" />
             </Card>
