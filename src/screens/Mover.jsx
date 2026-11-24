@@ -35,12 +35,16 @@ import {
   MessageSquare,
   Route as RouteIcon,
   User,
+  Warehouse,
 } from 'lucide-react'
 import { Button, Card, Badge, Stagger, Item, MapView, money, moneyCompact, Logo } from '../components/ui'
 import { RouteMap } from '../components/maps'
 import { TopBar, BottomNav, NotifBell } from '../components/nav'
 import { documents, moverNotifications } from '../lib/data'
 import { useAuth } from '../lib/AuthContext'
+import { haversineKm } from '../lib/maps'
+import { listApprovedWarehouses, getWarehouse } from '../lib/warehouse'
+import { parseSafepayNotes } from '../lib/safepay'
 import {
   listAvailableJobs,
   listMoverJobs,
@@ -293,14 +297,24 @@ export function MoverAvailable() {
   const { user, profile } = useAuth()
   const nav = useNavigate()
   const [jobs, setJobs] = useState([])
+  const [whMap, setWhMap] = useState({})
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId] = useState(null)
 
   const load = () => {
     setLoading(true)
-    listAvailableJobs()
-      .then(setJobs)
-      .catch(() => {})
+    Promise.all([
+      listAvailableJobs().catch(() => []),
+      listApprovedWarehouses().catch(() => []),
+    ])
+      .then(([list, whs]) => {
+        setJobs(list)
+        const map = {}
+        whs.forEach((w) => {
+          map[w.id] = w
+        })
+        setWhMap(map)
+      })
       .finally(() => setLoading(false))
   }
   useEffect(load, [])
@@ -309,19 +323,26 @@ export function MoverAvailable() {
 
   const isApproved = profile?.role === 'mover' && profile?.verification_status === 'approved'
 
-  async function accept(id) {
+  async function accept(job) {
     if (!isApproved) {
       alert('Verification Required: Your driving license and police clearance certificate are awaiting admin approval before you can accept customer move requests.')
       return
     }
-    setBusyId(id)
+    const targetWh = job.warehouse_id ? whMap[job.warehouse_id] : null
+    if (targetWh) {
+      const ok = window.confirm(
+        `Commit to complete shifting from ${job.customer_name || 'Customer'}'s current location (${job.pickup_address}) to ${targetWh.name} (${targetWh.address})?`
+      )
+      if (!ok) return
+    }
+    setBusyId(job.id)
     try {
-      const row = await acceptJob(id, user.id)
+      const row = await acceptJob(job.id, user.id)
       if (!row) {
-        setJobs((p) => p.filter((j) => j.id !== id))
+        setJobs((p) => p.filter((j) => j.id !== job.id))
         return
       }
-      nav(`/mover/job/${id}`)
+      nav(`/mover/job/${job.id}`)
     } catch (e) {
       alert(e.message || 'Could not accept job.')
     } finally {
@@ -373,53 +394,115 @@ export function MoverAvailable() {
           </div>
         ) : (
           <AnimatePresence>
-            {jobs.map((j) => (
-              <motion.div key={j.id} layout exit={{ opacity: 0, x: -80 }} variants={{ hidden: { opacity: 0, y: 16 }, show: { opacity: 1, y: 0 } }}>
-                <Card className="p-4">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="grid h-9 w-9 place-items-center rounded-xl bg-brand-50 text-brand-600">
-                        <Truck className="h-5 w-5" />
-                      </span>
-                      <div>
-                        <p className="text-sm font-bold text-ink">{j.vehicle || 'Move'}</p>
-                        <p className="text-[11px] text-slate-400">Customer: {j.customer_name || 'Customer'}</p>
+            {jobs.map((j) => {
+              const targetWh = j.warehouse_id ? whMap[j.warehouse_id] : null
+              const sp = parseSafepayNotes(j.notes, j.price)
+              const distFromWh =
+                j.distance_km ??
+                (targetWh && j.pickup_lat != null && targetWh.lat != null
+                  ? haversineKm(j.pickup_lat, j.pickup_lng, targetWh.lat, targetWh.lng)
+                  : null)
+
+              return (
+                <motion.div key={j.id} layout exit={{ opacity: 0, x: -80 }} variants={{ hidden: { opacity: 0, y: 16 }, show: { opacity: 1, y: 0 } }}>
+                  <Card className={`p-4 ${targetWh ? 'ring-2 ring-purple-200' : ''}`}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className={`grid h-9 w-9 place-items-center rounded-xl ${targetWh ? 'bg-purple-100 text-purple-700' : 'bg-brand-50 text-brand-600'}`}>
+                          {targetWh ? <Warehouse className="h-5 w-5" /> : <Truck className="h-5 w-5" />}
+                        </span>
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <p className="text-sm font-bold text-ink">{j.vehicle || 'Move'}</p>
+                            {targetWh && <Badge tone="progress">Warehouse Shift</Badge>}
+                          </div>
+                          <p className="text-[11px] text-slate-400">Customer: {j.customer_name || 'Customer'}</p>
+                        </div>
                       </div>
+                      <Badge tone="brand">{money(Number(j.price))}</Badge>
                     </div>
-                    <Badge tone="brand">{money(Number(j.price))}</Badge>
-                  </div>
 
-                  <div className="my-3 space-y-2 border-y border-slate-100 py-3 text-xs">
-                    <p className="flex gap-2 text-slate-500">
-                      <RouteIcon className="h-4 w-4 shrink-0 text-brand-500" />
-                      <span><span className="font-semibold text-ink">{j.pickup_address}</span> → {j.dropoff_address}</span>
-                    </p>
-                    <p className="flex items-center gap-2 text-slate-500">
-                      <Calendar className="h-4 w-4 shrink-0 text-brand-500" /> {j.schedule_label || 'Flexible'} · Pickup Window
-                    </p>
-                  </div>
-
-                  <div className="flex gap-3">
-                    <Button variant="ghost" onClick={() => reject(j.id)} className="flex-1" disabled={busyId === j.id}>
-                      Reject
-                    </Button>
-                    {isApproved ? (
-                      <Button onClick={() => accept(j.id)} className="flex-1" disabled={busyId === j.id}>
-                        {busyId === j.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <>Accept Job <ArrowRightInline /></>}
-                      </Button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => alert('Approval Required: You must wait for admin verification of your driving license and police certification before accepting customer requests.')}
-                        className="flex-1 flex items-center justify-center gap-1.5 rounded-xl bg-slate-200 px-3 py-2.5 text-xs font-bold text-slate-600 opacity-90 transition hover:bg-slate-300"
-                      >
-                        <ShieldCheck className="h-4 w-4 text-slate-500" /> Approval Required
-                      </button>
+                    {sp && (
+                      <div className="mt-2.5 flex items-center justify-between rounded-xl bg-emerald-50 px-3 py-2 text-[11px] ring-1 ring-emerald-200/80">
+                        <span className="flex items-center gap-1 font-bold text-emerald-800">
+                          <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" /> 30% Paid (Safepay: {money(sp.advancePaid)})
+                        </span>
+                        <span className="font-extrabold text-ink">Collect {money(sp.remainingDue)}</span>
+                      </div>
                     )}
-                  </div>
-                </Card>
-              </motion.div>
-            ))}
+
+                    {targetWh && (
+                      <div className="mt-3 rounded-xl border border-purple-200 bg-purple-50/70 p-3 space-y-2 text-xs">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-extrabold text-purple-900 flex items-center gap-1.5">
+                            <Warehouse className="h-3.5 w-3.5 text-purple-600" />
+                            Target Warehouse: {targetWh.name}
+                          </span>
+                          {distFromWh != null && (
+                            <span className="shrink-0 rounded-full bg-purple-600 px-2 py-0.5 text-[10px] font-bold text-white">
+                              {distFromWh} km away
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-purple-800">
+                          Customer Location → <span className="font-bold">{targetWh.name} ({targetWh.city})</span>
+                        </p>
+                        <div className="overflow-hidden rounded-xl border border-purple-200/80">
+                          <RouteMap
+                            pickup={j.pickup_address}
+                            dropoff={targetWh.address || j.dropoff_address}
+                            dark
+                            className="h-28 w-full"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="my-3 space-y-2 border-y border-slate-100 py-3 text-xs">
+                      <p className="flex gap-2 text-slate-500">
+                        <RouteIcon className="h-4 w-4 shrink-0 text-brand-500" />
+                        <span>
+                          <span className="font-semibold text-ink">{j.pickup_address}</span> → {j.dropoff_address}
+                        </span>
+                      </p>
+                      <p className="flex items-center justify-between gap-2 text-slate-500">
+                        <span className="flex items-center gap-2">
+                          <Calendar className="h-4 w-4 shrink-0 text-brand-500" /> {j.schedule_label || 'Flexible'}
+                        </span>
+                        {distFromWh != null && (
+                          <span className="font-bold text-brand-700">{distFromWh} km route</span>
+                        )}
+                      </p>
+                    </div>
+
+                    <div className="flex gap-3">
+                      <Button variant="ghost" onClick={() => reject(j.id)} className="flex-1" disabled={busyId === j.id}>
+                        Reject
+                      </Button>
+                      {isApproved ? (
+                        <Button onClick={() => accept(j)} className="flex-1" disabled={busyId === j.id}>
+                          {busyId === j.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : targetWh ? (
+                            <>Commit to Shift <ArrowRightInline /></>
+                          ) : (
+                            <>Accept Job <ArrowRightInline /></>
+                          )}
+                        </Button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => alert('Approval Required: You must wait for admin verification of your driving license and police certification before accepting customer requests.')}
+                          className="flex-1 flex items-center justify-center gap-1.5 rounded-xl bg-slate-200 px-3 py-2.5 text-xs font-bold text-slate-600 opacity-90 transition hover:bg-slate-300"
+                        >
+                          <ShieldCheck className="h-4 w-4 text-slate-500" /> Approval Required
+                        </button>
+                      )}
+                    </div>
+                  </Card>
+                </motion.div>
+              )
+            })}
           </AnimatePresence>
         )}
         {!loading && jobs.length === 0 && (
@@ -541,6 +624,8 @@ export function MoverJobDetail() {
   const nav = useNavigate()
   const { profile } = useAuth()
   const [booking, setBooking] = useState(null)
+  const [targetWarehouse, setTargetWarehouse] = useState(null)
+  const [routeMeta, setRouteMeta] = useState(null)
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -551,9 +636,18 @@ export function MoverJobDetail() {
     if (!id) return
     setLoading(true)
     Promise.all([getBooking(id), getBookingItems(id)])
-      .then(([b, it]) => {
+      .then(async ([b, it]) => {
         setBooking(b)
         setItems(it)
+        if (b?.warehouse_id) {
+          try {
+            setTargetWarehouse(await getWarehouse(b.warehouse_id))
+          } catch {
+            setTargetWarehouse(null)
+          }
+        } else {
+          setTargetWarehouse(null)
+        }
       })
       .catch(() => {})
       .finally(() => setLoading(false))
@@ -602,11 +696,28 @@ export function MoverJobDetail() {
         const lat = pLat + (dLat - pLat) * r
         const lng = pLng + (dLng - pLng) * r
         updateDriverLocation(profile.id, booking.id, lat, lng, {
-          speed: ns === 'loading' ? 0 : 38,
+          speed: ['en_route', 'in_transit'].includes(ns) ? 35 : 0,
         })
       }
     } catch {
       // ignore
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function completeWarehouseShifting() {
+    if (!booking) return
+    const ok = window.confirm(
+      `Confirm that all items have been shifted from customer's location and handed over to ${targetWarehouse?.name || 'the selected warehouse'}?`
+    )
+    if (!ok) return
+    setBusy(true)
+    try {
+      const b = await setStatus(booking.id, 'delivered')
+      setBooking(b)
+    } catch (e) {
+      alert(e.message || 'Could not complete warehouse shifting.')
     } finally {
       setBusy(false)
     }
@@ -664,12 +775,57 @@ export function MoverJobDetail() {
         {/* dark map header */}
         <Item>
           <div className="relative overflow-hidden rounded-2xl">
-            <RouteMap pickup={booking.pickup_address} dropoff={booking.dropoff_address} dark className="h-40 w-full" />
-            <span className="pointer-events-none absolute left-3 top-3 flex items-center gap-1.5 rounded-full bg-brand-600 px-3 py-1.5 text-[11px] font-bold text-white">
-              <Navigation className="h-3.5 w-3.5" /> En route to destination
+            <RouteMap
+              pickup={booking.pickup_address}
+              dropoff={targetWarehouse?.address || booking.dropoff_address}
+              onInfo={setRouteMeta}
+              dark
+              className="h-44 w-full"
+            />
+            <span className={`pointer-events-none absolute left-3 top-3 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-bold text-white ${targetWarehouse ? 'bg-purple-600' : 'bg-brand-600'}`}>
+              {targetWarehouse ? <Warehouse className="h-3.5 w-3.5" /> : <Navigation className="h-3.5 w-3.5" />}
+              {targetWarehouse ? `Shift to ${targetWarehouse.name}` : STATUS_LABEL[booking.status] || 'Active Move'}
             </span>
+            {routeMeta?.distance && (
+              <span className="pointer-events-none absolute bottom-3 right-3 rounded-xl bg-slate-950/85 px-3 py-1.5 text-right text-[11px] font-bold text-white backdrop-blur">
+                {routeMeta.distance} {routeMeta.duration ? `· ${routeMeta.duration}` : ''}
+              </span>
+            )}
           </div>
         </Item>
+
+        {/* Committed Customer-Selected Warehouse Destination Card */}
+        {targetWarehouse && (
+          <Item>
+            <Card className="border-2 border-purple-200 bg-purple-50/70 p-4 space-y-2.5">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-2.5">
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-purple-600 text-white">
+                    <Warehouse className="h-5 w-5" />
+                  </span>
+                  <div>
+                    <p className="text-[10px] font-extrabold uppercase tracking-wider text-purple-600">
+                      Committed Warehouse Destination
+                    </p>
+                    <p className="text-sm font-extrabold text-ink">{targetWarehouse.name}</p>
+                    <p className="text-[11px] text-slate-600">{targetWarehouse.address}</p>
+                  </div>
+                </div>
+                <Badge tone="green">Verified</Badge>
+              </div>
+              <div className="flex items-center justify-between border-t border-purple-200/70 pt-2 text-xs">
+                <span className="font-semibold text-purple-900">
+                  Distance from customer: {routeMeta?.distance || (booking.distance_km ? `${booking.distance_km} km` : 'Calculating...')}
+                </span>
+                {targetWarehouse.contact_phone && (
+                  <a href={`tel:${targetWarehouse.contact_phone}`} className="inline-flex items-center gap-1 font-extrabold text-purple-700">
+                    <Phone className="h-3.5 w-3.5" /> Call Hub
+                  </a>
+                )}
+              </div>
+            </Card>
+          </Item>
+        )}
 
         {/* route estimate */}
         <Item>
@@ -680,7 +836,9 @@ export function MoverJobDetail() {
                 <p className="text-2xl font-extrabold text-brand-700">{money(Number(booking.price))}</p>
               </div>
               <div className="text-right">
-                <Badge tone="slate">Standard Shift</Badge>
+                <Badge tone={targetWarehouse ? 'progress' : 'slate'}>
+                  {targetWarehouse ? 'Warehouse Shifting' : 'Standard Shift'}
+                </Badge>
                 <p className="mt-1 text-[11px] text-slate-400">Job ID: #{String(booking.id).slice(0, 8)}</p>
               </div>
             </div>
@@ -690,6 +848,24 @@ export function MoverJobDetail() {
             <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3 text-sm">
               <span className="flex items-center gap-1 text-slate-500"><Truck className="h-4 w-4" /> {booking.vehicle}</span>
             </div>
+            {(() => {
+              const sp = parseSafepayNotes(booking.notes, booking.price)
+              if (!sp) return null
+              return (
+                <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50/80 p-3 space-y-1 text-xs">
+                  <div className="flex items-center justify-between font-extrabold text-emerald-800">
+                    <span className="flex items-center gap-1">
+                      <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" /> 30% Advance Paid (Safepay)
+                    </span>
+                    <span>{money(sp.advancePaid)}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-slate-700">
+                    <span>Collect Remaining 70% ({sp.balanceMethod})</span>
+                    <span className="font-extrabold text-ink">{money(sp.remainingDue)}</span>
+                  </div>
+                </div>
+              )
+            })()}
           </Card>
         </Item>
 
@@ -749,9 +925,11 @@ export function MoverJobDetail() {
               <Button variant="ghost" className="flex-1"><MessageSquare className="h-4 w-4" /> Message</Button>
             </div>
             <div className="mt-3 rounded-xl bg-slate-50 p-3">
-              <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Customer Instructions</p>
+              <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
+                {targetWarehouse ? 'Warehouse Shifting Instructions' : 'Customer Instructions'}
+              </p>
               <p className="mt-1 text-xs italic text-slate-600">
-                "Please handle fragile items with extra care and call when you are 5 mins away from drop-off."
+                {booking.notes || '"Please handle fragile items with extra care and call when you are 5 mins away from drop-off."'}
               </p>
             </div>
           </Card>
@@ -782,15 +960,33 @@ export function MoverJobDetail() {
         ) : (
           <>
             <Item className="flex gap-3">
-              <Button variant="ghost" className="w-auto px-5"><CircleHelp className="h-4 w-4" /> Issues?</Button>
-              {booking.status === 'at_dropoff' ? (
-                <Button onClick={() => nav(`/mover/confirm/${booking.id}`)}>
-                  <QrCode className="h-4 w-4" /> Scan to Confirm Delivery
-                </Button>
+              {booking.status === 'at_dropoff' && targetWarehouse ? (
+                <>
+                  <Button variant="ghost" onClick={() => nav(`/mover/confirm/${booking.id}`)} className="w-auto px-4">
+                    <QrCode className="h-4 w-4" /> QR Scan
+                  </Button>
+                  <Button onClick={completeWarehouseShifting} disabled={busy}>
+                    {busy ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <><CheckCircle2 className="h-4 w-4" /> Complete Warehouse Shifting</>
+                    )}
+                  </Button>
+                </>
+              ) : booking.status === 'at_dropoff' ? (
+                <>
+                  <Button variant="ghost" className="w-auto px-5"><CircleHelp className="h-4 w-4" /> Issues?</Button>
+                  <Button onClick={() => nav(`/mover/confirm/${booking.id}`)}>
+                    <QrCode className="h-4 w-4" /> Scan to Confirm Delivery
+                  </Button>
+                </>
               ) : (
-                <Button onClick={advance} disabled={busy}>
-                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <>{cta} <Navigation className="h-4 w-4" /></>}
-                </Button>
+                <>
+                  <Button variant="ghost" className="w-auto px-5"><CircleHelp className="h-4 w-4" /> Issues?</Button>
+                  <Button onClick={advance} disabled={busy}>
+                    {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <>{cta} <Navigation className="h-4 w-4" /></>}
+                  </Button>
+                </>
               )}
             </Item>
 

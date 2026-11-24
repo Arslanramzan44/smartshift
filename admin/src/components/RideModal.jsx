@@ -8,8 +8,10 @@ import {
   User,
   Phone,
   QrCode,
+  ShieldCheck,
 } from 'lucide-react'
 import { updateBookingStatus, reassignBookingDriver, cancelBookingAdmin } from '../lib/adminData'
+import { parseSafepayInfo } from '../lib/safepayInfo'
 
 export function RideModal({ ride, allDrivers = [], onClose, onUpdated }) {
   const [status, setStatus] = useState(ride?.status || 'pending')
@@ -226,6 +228,37 @@ export function RideModal({ ride, allDrivers = [], onClose, onUpdated }) {
               <p className="text-xs font-bold text-white mt-1">{ride.schedule_label || 'Immediate'}</p>
             </div>
           </div>
+
+          {(() => {
+            const sp = parseSafepayInfo(ride.notes, ride.price)
+            if (!sp) return null
+            return (
+              <div className="rounded-2xl border border-emerald-500/30 bg-emerald-950/20 p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-extrabold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+                    <ShieldCheck className="h-4 w-4" /> Safepay 30% Advance Verified
+                  </p>
+                  {sp.tracker && (
+                    <span className="font-mono text-[10px] text-slate-400">{sp.tracker}</span>
+                  )}
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div className="rounded-xl bg-slate-900/80 p-2.5">
+                    <p className="text-[10px] text-slate-400">30% Paid (Safepay)</p>
+                    <p className="font-extrabold text-emerald-400">Rs. {sp.advancePaid.toLocaleString()}</p>
+                  </div>
+                  <div className="rounded-xl bg-slate-900/80 p-2.5">
+                    <p className="text-[10px] text-slate-400">70% Remaining</p>
+                    <p className="font-extrabold text-white">Rs. {sp.remainingDue.toLocaleString()}</p>
+                  </div>
+                  <div className="rounded-xl bg-slate-900/80 p-2.5">
+                    <p className="text-[10px] text-slate-400">Balance Method</p>
+                    <p className="font-bold text-slate-200">{sp.balanceMethod}</p>
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
 
           {/* Inventory Items */}
           <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4">

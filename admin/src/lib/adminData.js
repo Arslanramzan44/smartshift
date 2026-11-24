@@ -187,12 +187,13 @@ export async function toggleUserBan(userId, ban) {
 export async function fetchAllBookings() {
   await ensureAdminSession()
 
-  const [{ data: dbBookings, error }, { data: profs }] = await Promise.all([
+  const [{ data: dbBookings, error }, { data: profs }, { data: whs }] = await Promise.all([
     supabase
       .from('bookings')
       .select('*, booking_items(*)')
       .order('created_at', { ascending: false }),
     supabase.from('profiles').select('id, full_name, phone, email, vehicle_type, vehicle_plate, driver_lat, driver_lng, is_online, last_active_at'),
+    supabase.from('warehouses').select('id, name, city, address'),
   ])
 
   if (error) {
@@ -204,10 +205,15 @@ export async function fetchAllBookings() {
   ;(profs || []).forEach((p) => {
     profilesMap[p.id] = p
   })
+  const whMap = {}
+  ;(whs || []).forEach((w) => {
+    whMap[w.id] = w
+  })
 
   return (dbBookings || []).map((b) => {
     const custProfile = profilesMap[b.customer_id] || {}
     const moverProfile = b.mover_id ? profilesMap[b.mover_id] || {} : null
+    const targetWh = b.warehouse_id ? whMap[b.warehouse_id] || null : null
     const items = b.booking_items || []
 
     return {
@@ -219,6 +225,8 @@ export async function fetchAllBookings() {
       mover_phone: b.mover_id ? (b.mover_phone || moverProfile?.phone || null) : null,
       mover_plate: moverProfile?.vehicle_plate || null,
       mover_online: moverProfile?.is_online || false,
+      warehouse_name: targetWh?.name || null,
+      warehouse_city: targetWh?.city || null,
       driver_lat: b.driver_lat ?? moverProfile?.driver_lat ?? null,
       driver_lng: b.driver_lng ?? moverProfile?.driver_lng ?? null,
       last_location_at: b.last_location_at || moverProfile?.last_active_at || null,
@@ -235,6 +243,7 @@ export async function updateBookingStatus(bookingId, status) {
   await ensureAdminSession()
   const patch = { status }
   if (status === 'delivered') patch.completed_at = new Date().toISOString()
+  if (!['en_route', 'in_transit'].includes(status)) patch.driver_speed_kmh = 0
 
   const { error } = await supabase.from('bookings').update(patch).eq('id', bookingId)
   if (error) throw error
@@ -272,7 +281,7 @@ export async function cancelBookingAdmin(bookingId, reason = 'Cancelled by admin
   await ensureAdminSession()
   const { error } = await supabase
     .from('bookings')
-    .update({ status: 'cancelled', cancellation_reason: reason, notes: reason })
+    .update({ status: 'cancelled', cancellation_reason: reason, notes: reason, driver_speed_kmh: 0 })
     .eq('id', bookingId)
 
   if (error) throw error

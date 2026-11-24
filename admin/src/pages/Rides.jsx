@@ -18,6 +18,7 @@ import {
   fetchAllStorageBookings,
   subscribeToRealtimeUpdates,
 } from '../lib/adminData'
+import { parseSafepayInfo } from '../lib/safepayInfo'
 
 const ACTIVE_MOVE_STATUSES = ['accepted', 'en_route', 'loading', 'in_transit', 'at_dropoff']
 
@@ -254,6 +255,11 @@ export function RidesPage() {
 
                       <td className="p-4 max-w-xs">
                         <div className="space-y-1">
+                          {ride.warehouse_name && (
+                            <span className="inline-flex items-center gap-1 rounded-md bg-purple-500/20 border border-purple-500/30 px-2 py-0.5 text-[10px] font-extrabold text-purple-300">
+                              <Warehouse className="h-3 w-3" /> Shift → {ride.warehouse_name}
+                            </span>
+                          )}
                           <p className="flex items-center gap-1.5 text-slate-300 truncate">
                             <MapPin className="h-3 w-3 text-emerald-400 shrink-0" />
                             <span className="truncate">{ride.pickup_address}</span>
@@ -281,10 +287,23 @@ export function RidesPage() {
                       </td>
 
                       <td className="p-4">
-                        <p className="font-black text-white">Rs. {Number(ride.price || 0).toLocaleString()}</p>
-                        <p className="text-[10px] text-slate-400 uppercase font-semibold">
-                          {ride.payment_method || 'COD'} · {ride.items_count} items
-                        </p>
+                        {(() => {
+                          const sp = parseSafepayInfo(ride.notes, ride.price)
+                          return (
+                            <>
+                              <p className="font-black text-white">Rs. {Number(ride.price || 0).toLocaleString()}</p>
+                              {sp ? (
+                                <p className="mt-0.5 inline-flex items-center gap-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-bold text-emerald-400 border border-emerald-500/30">
+                                  Safepay 30% Paid · Due Rs. {sp.remainingDue.toLocaleString()}
+                                </p>
+                              ) : (
+                                <p className="text-[10px] text-slate-400 uppercase font-semibold">
+                                  {ride.payment_method || 'COD'} · {ride.items_count} items
+                                </p>
+                              )}
+                            </>
+                          )
+                        })()}
                       </td>
 
                       <td className="p-4">
@@ -364,8 +383,20 @@ export function RidesPage() {
                           </p>
                         </td>
                         <td className="p-4">
-                          <p className="font-black text-white">Rs. {Number(sb.price || 0).toLocaleString()}</p>
-                          <p className="text-[10px] text-slate-400">{sb.duration_label} · {sb.start_date || 'Flexible'}</p>
+                          {(() => {
+                            const sp = parseSafepayInfo(sb.notes, sb.price)
+                            return (
+                              <>
+                                <p className="font-black text-white">Rs. {Number(sb.price || 0).toLocaleString()}</p>
+                                <p className="text-[10px] text-slate-400">{sb.duration_label} · {sb.start_date || 'Flexible'}</p>
+                                {sp && (
+                                  <p className="mt-0.5 inline-flex items-center gap-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-bold text-emerald-400 border border-emerald-500/30">
+                                    Safepay 30% Paid (Rs. {sp.advancePaid.toLocaleString()})
+                                  </p>
+                                )}
+                              </>
+                            )
+                          })()}
                         </td>
                         <td className="p-4">
                           <span

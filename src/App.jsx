@@ -17,6 +17,7 @@ import {
 import { getRole, homeFor } from './lib/auth'
 import { BookWizard } from './screens/Book'
 import { WarehouseStorage } from './screens/Storage'
+import { PaymentCallback } from './screens/PaymentCallback'
 import { SettingsScreen } from './screens/Settings'
 import {
   MoverDashboard,
@@ -135,6 +136,7 @@ function AnimatedRoutes() {
         <Route path="/forgot" element={<Page><ForgotPassword /></Page>} />
         <Route path="/reset" element={<Page><ResetPassword /></Page>} />
         <Route path="/profile/edit" element={<AuthGuard><Page><EditProfile /></Page></AuthGuard>} />
+        <Route path="/payment/callback" element={<AuthGuard><Page><PaymentCallback /></Page></AuthGuard>} />
 
         <Route path="/customer" element={<RoleGuard role="customer"><Page><CustomerDashboard /></Page></RoleGuard>} />
         <Route path="/customer/book" element={<RoleGuard role="customer"><Page><BookWizard /></Page></RoleGuard>} />

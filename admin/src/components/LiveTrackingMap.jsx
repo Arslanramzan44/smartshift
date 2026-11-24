@@ -42,13 +42,20 @@ export function LiveTrackingMap({
   const [mapError, setMapError] = useState(null)
   const [isSimulating, setIsSimulating] = useState(false)
   const [telemetry, setTelemetry] = useState({
-    speed: 38,
-    heading: 'NE (45°)',
-    eta: '14 mins',
-    distanceRemaining: '4.8 km',
-    phase: 'In Transit',
+    speed: 0,
+    heading: '—',
+    eta: '—',
+    distanceRemaining: '—',
+    phase: 'Pending',
   })
   const [simProgress, setSimProgress] = useState(0.35)
+
+  const MOVING_STATUSES = ['en_route', 'in_transit']
+  const resolveSpeed = (ride) => {
+    if (!ride || !MOVING_STATUSES.includes(ride.status)) return 0
+    const raw = Number(ride.driver_speed_kmh)
+    return Number.isFinite(raw) && raw > 0 ? Math.round(raw) : 0
+  }
 
   // 1. Load Google Maps once
   useEffect(() => {
@@ -90,14 +97,31 @@ export function LiveTrackingMap({
     })
   }, [mapsApi])
 
-  // Stop simulation when ride changes
+  // Stop simulation and sync telemetry when ride or status changes
   useEffect(() => {
     if (simIntervalRef.current) {
       clearInterval(simIntervalRef.current)
       simIntervalRef.current = null
       setIsSimulating(false)
     }
-  }, [selectedRide?.id, mode])
+    if (selectedRide) {
+      const st = selectedRide.status || 'pending'
+      setTelemetry({
+        speed: resolveSpeed(selectedRide),
+        heading: '—',
+        eta: st === 'delivered' ? 'Done' : st === 'cancelled' ? 'Cancelled' : '—',
+        distanceRemaining:
+          st === 'delivered'
+            ? '0 km'
+            : st === 'cancelled'
+            ? '—'
+            : selectedRide.distance_km
+            ? `${selectedRide.distance_km} km`
+            : '—',
+        phase: st.replace('_', ' '),
+      })
+    }
+  }, [selectedRide?.id, selectedRide?.status, selectedRide?.driver_speed_kmh, mode]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // 3. Render Drivers, Routes, and Warehouses
   useEffect(() => {
@@ -192,12 +216,19 @@ export function LiveTrackingMap({
               directionsRendererRef.current?.setDirections(result)
               const leg = result.routes[0]?.legs[0]
               if (leg) {
+                const st = selectedRide.status || 'pending'
+                const isDone = st === 'delivered'
+                const isCancelled = st === 'cancelled'
                 setTelemetry((prev) => ({
                   ...prev,
-                  speed: selectedRide.driver_speed_kmh ?? prev.speed,
-                  distanceRemaining: leg.distance?.text || `${selectedRide.distance_km || 0} km`,
-                  eta: leg.duration?.text || 'Calculating',
-                  phase: (selectedRide.status || 'pending').replace('_', ' '),
+                  speed: resolveSpeed(selectedRide),
+                  distanceRemaining: isDone
+                    ? '0 km'
+                    : isCancelled
+                    ? '—'
+                    : leg.distance?.text || `${selectedRide.distance_km || 0} km`,
+                  eta: isDone ? 'Done' : isCancelled ? 'Cancelled' : leg.duration?.text || '—',
+                  phase: st.replace('_', ' '),
                 }))
 
                 // Custom pickup & dropoff markers
@@ -302,6 +333,13 @@ export function LiveTrackingMap({
       clearInterval(simIntervalRef.current)
       simIntervalRef.current = null
       setIsSimulating(false)
+      setTelemetry((prev) => ({ ...prev, speed: 0 }))
+      if (selectedRide?.id && selectedRide?.driver_lat != null && selectedRide?.driver_lng != null) {
+        updateBookingDriverCoordinates(selectedRide.id, Number(selectedRide.driver_lat), Number(selectedRide.driver_lng), {
+          moverId: selectedRide.mover_id,
+          speed: 0,
+        })
+      }
     } else {
       setIsSimulating(true)
       let currentStep = simProgress
@@ -388,9 +426,11 @@ export function LiveTrackingMap({
             : 'Active Fleet Overview'}
         </div>
 
-        {mode !== 'warehouses' && selectedRide && (
-          <button
-            onClick={toggleSimulation}
+        {mode !== 'warehouses' &&
+          selectedRide &&
+          ['accepted', 'en_route', 'loading', 'in_transit', 'at_dropoff'].includes(selectedRide.status) && (
+            <button
+              onClick={toggleSimulation}
             className={`flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold shadow-xl transition backdrop-blur-md border ${
               isSimulating
                 ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30'
@@ -428,7 +468,9 @@ export function LiveTrackingMap({
               <span className="text-slate-400 flex items-center gap-1">
                 <Gauge className="h-3 w-3 text-slate-500" /> Speed
               </span>
-              <p className="mt-0.5 font-extrabold text-white text-sm">{telemetry.speed} km/h</p>
+              <p className="mt-0.5 font-extrabold text-white text-sm">
+                {isSimulating ? telemetry.speed : resolveSpeed(selectedRide)} km/h
+              </p>
             </div>
             <div className="rounded-xl bg-slate-900/80 p-2 border border-slate-800/60">
               <span className="text-slate-400 flex items-center gap-1">

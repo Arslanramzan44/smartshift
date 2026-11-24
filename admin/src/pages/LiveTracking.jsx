@@ -337,8 +337,10 @@ export function LiveTrackingPage() {
                       </div>
 
                       <div className="mt-2.5 flex items-center justify-between text-[11px] text-slate-400 pt-2 border-t border-slate-800/50">
-                        <span>{ride.customer_name}</span>
-                        <span className="font-bold text-white">Rs. {Number(ride.price || 0).toLocaleString()}</span>
+                        <span className="truncate">
+                          {ride.warehouse_name ? `→ ${ride.warehouse_name}` : ride.customer_name}
+                        </span>
+                        <span className="font-bold text-white shrink-0 ml-2">Rs. {Number(ride.price || 0).toLocaleString()}</span>
                       </div>
                     </div>
                   )

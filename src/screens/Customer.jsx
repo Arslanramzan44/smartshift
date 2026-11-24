@@ -36,6 +36,8 @@ import { ratingTags, tipOptions, customerNotifications } from '../lib/data'
 import { useAuth } from '../lib/AuthContext'
 import { listCustomerBookings, getBooking, STATUS_LABEL, STATUS_FLOW, statusTone, deliveryPayload, createReview, getReviewForBooking, canCancel, cancelBooking } from '../lib/bookings'
 import { listStorageBookings } from '../lib/storage'
+import { getWarehouse } from '../lib/warehouse'
+import { parseSafepayNotes } from '../lib/safepay'
 import { getProfile } from '../lib/db'
 import { QRCodeSVG } from 'qrcode.react'
 import { ShieldCheck } from 'lucide-react'
@@ -233,6 +235,7 @@ export function CustomerTrack() {
   const { user, profile } = useAuth()
   const [booking, setBooking] = useState(null)
   const [mover, setMover] = useState(null)
+  const [targetWarehouse, setTargetWarehouse] = useState(null)
   const [loading, setLoading] = useState(true)
   const [cancelling, setCancelling] = useState(false)
   const [cancelErr, setCancelErr] = useState('')
@@ -285,6 +288,15 @@ export function CustomerTrack() {
     getProfile(booking.mover_id).then(setMover).catch(() => setMover(null))
   }, [booking?.mover_id])
 
+  // Load selected warehouse if this move is a Warehouse Shifting booking
+  useEffect(() => {
+    if (!booking?.warehouse_id) {
+      setTargetWarehouse(null)
+      return
+    }
+    getWarehouse(booking.warehouse_id).then(setTargetWarehouse).catch(() => setTargetWarehouse(null))
+  }, [booking?.warehouse_id])
+
   // Live updates: while the move is active, refetch so mover status changes
   // (and the delivery confirmation) appear without a manual reload.
   useEffect(() => {
@@ -330,14 +342,41 @@ export function CustomerTrack() {
           <>
             <div className="flex items-start justify-between">
               <div>
-                <Badge tone={statusTone(booking.status)}>{STATUS_LABEL[booking.status]}</Badge>
-                <p className="mt-2 text-2xl font-extrabold text-ink">Moving to drop-off</p>
-                <p className="text-sm text-slate-500">{booking.mover_id ? 'Mover assigned' : 'Finding a mover near you'}</p>
+                <div className="flex items-center gap-1.5">
+                  <Badge tone={statusTone(booking.status)}>{STATUS_LABEL[booking.status]}</Badge>
+                  {targetWarehouse && <Badge tone="progress">Warehouse Shift</Badge>}
+                </div>
+                <p className="mt-2 text-2xl font-extrabold text-ink">
+                  {targetWarehouse ? `Shifting to ${targetWarehouse.name}` : 'Moving to drop-off'}
+                </p>
+                <p className="text-sm text-slate-500">
+                  {booking.mover_id
+                    ? targetWarehouse
+                      ? 'Driver committed to complete shifting into your selected warehouse'
+                      : 'Mover assigned'
+                    : 'Finding a verified driver near your location'}
+                </p>
               </div>
               <button className="grid h-9 w-9 place-items-center rounded-full bg-brand-50 text-brand-600">
                 <Share2 className="h-4 w-4" />
               </button>
             </div>
+
+            {targetWarehouse && (
+              <Link to="/customer/storage" className="block my-4">
+                <Card className="flex items-center gap-3 border border-purple-200 bg-purple-50/60 p-3.5">
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-purple-600 text-white">
+                    <Warehouse className="h-5 w-5" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] font-bold uppercase text-purple-600">Selected Warehouse Destination</p>
+                    <p className="truncate text-sm font-bold text-ink">{targetWarehouse.name}</p>
+                    <p className="truncate text-[11px] text-slate-500">{targetWarehouse.address}</p>
+                  </div>
+                  <ArrowRight className="h-4 w-4 text-purple-400 shrink-0" />
+                </Card>
+              </Link>
+            )}
 
             {booking.mover_id && (
               <Card className="my-4 p-4 ring-1 ring-slate-100">
@@ -407,6 +446,34 @@ export function CustomerTrack() {
               </div>
               <p className="text-sm font-extrabold text-brand-700">{money(Number(booking.price))}</p>
             </Card>
+
+            {(() => {
+              const sp = parseSafepayNotes(booking.notes, booking.price)
+              if (!sp) return null
+              return (
+                <Card className="mb-4 border border-emerald-200 bg-emerald-50/70 p-3.5 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 text-xs font-extrabold text-emerald-800">
+                      <ShieldCheck className="h-4 w-4 text-emerald-600" /> Safepay 30% Advance Verified
+                    </span>
+                    <Badge tone="green">Paid</Badge>
+                  </div>
+                  <div className="flex justify-between text-xs text-emerald-900">
+                    <span>30% Advance Paid Online</span>
+                    <span className="font-extrabold">{money(sp.advancePaid)}</span>
+                  </div>
+                  <div className="flex justify-between text-xs text-slate-600">
+                    <span>70% Remaining ({sp.balanceMethod})</span>
+                    <span className="font-bold text-ink">{money(sp.remainingDue)}</span>
+                  </div>
+                  {sp.tracker && (
+                    <p className="pt-1 text-[10px] font-mono text-slate-500 truncate">
+                      Safepay Tracker: {sp.tracker}
+                    </p>
+                  )}
+                </Card>
+              )
+            })()}
 
             <Card className="mb-4 flex items-center gap-3 p-4 ring-1 ring-slate-100">
               <span className="grid h-11 w-11 place-items-center rounded-xl bg-brand-50 text-brand-600">

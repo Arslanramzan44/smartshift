@@ -186,6 +186,7 @@ export async function updateDriverLocation(moverId, bookingId, lat, lng, telemet
 export async function setStatus(bookingId, status) {
   const patch = { status }
   if (status === 'delivered') patch.completed_at = new Date().toISOString()
+  if (!['en_route', 'in_transit'].includes(status)) patch.driver_speed_kmh = 0
   const { data, error } = await supabase
     .from('bookings')
     .update(patch)

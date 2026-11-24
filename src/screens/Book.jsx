@@ -26,14 +26,23 @@ import {
   Boxes,
   Banknote,
   Route,
+  LocateFixed,
+  Thermometer,
 } from 'lucide-react'
-import { Button, Card, Field, money } from '../components/ui'
+import { Button, Card, Field, Badge, money } from '../components/ui'
 import { RouteMap, PlacesField } from '../components/maps'
 import { TopBar } from '../components/nav'
 import { vehicles, services, bookingItems, distanceFee, PER_KM_RATE } from '../lib/data'
-import { STORAGE_UNITS, STORAGE_DURATIONS, WAREHOUSES, storagePrice, createStorageBooking, listApprovedWarehouses } from '../lib/storage'
+import { getCurrentUserLocation } from '../lib/maps'
+import { STORAGE_UNITS, STORAGE_DURATIONS, WAREHOUSES, unitRateForWarehouse, storagePrice, listApprovedWarehouses } from '../lib/storage'
 import { useAuth } from '../lib/AuthContext'
-import { createBooking } from '../lib/bookings'
+import {
+  ADVANCE_PERCENT,
+  computePaymentSplit,
+  generateOrderRef,
+  savePendingCheckout,
+  createSafepayCheckoutSession,
+} from '../lib/safepay'
 
 const STEP_LABELS = ['Locations', 'Vehicle', 'Inventory', 'Summary', 'Payment']
 
@@ -109,6 +118,7 @@ export function BookWizard() {
   const storageTotal = storage.on ? storagePrice(storage.unit, storageDur.days, selectedWarehouse) : 0
   const addOnsTotal = extrasTotal + storageTotal
   const total = vehiclePrice + distanceTotal + addOnsTotal
+  const paymentSplit = computePaymentSplit(total)
 
   async function submitBooking() {
     setErr('')
@@ -117,59 +127,89 @@ export function BookWizard() {
       setDir(-1)
       return setErr('Enter both pickup and drop-off addresses.')
     }
+    if (paymentSplit.advanceAmount < 1) {
+      return setErr('Unable to calculate 30% advance payment for this booking.')
+    }
     setBusy(true)
     try {
-      const booking = await createBooking(
-        {
-          customer_id: user.id,
-          status: 'pending',
-          pickup_address: pickup.trim(),
-          dropoff_address: dropoff.trim(),
-          pickup_lat: routeInfo?.pickupLat ?? null,
-          pickup_lng: routeInfo?.pickupLng ?? null,
-          dropoff_lat: routeInfo?.dropoffLat ?? null,
-          dropoff_lng: routeInfo?.dropoffLng ?? null,
-          warehouse_id: storage.on && selectedWarehouse ? selectedWarehouse.id : null,
-          vehicle: vehicleObj.name,
-          schedule_label: scheduleLabel,
-          distance_km: distanceKm ? Math.round(distanceKm * 10) / 10 : null,
-          price: total,
-          payment_method: payMethod,
-          customer_name: profile?.full_name || null,
-          customer_phone: profile?.phone || null,
-        },
-        items,
-      )
-      // Optional add-on: also reserve a warehouse unit linked to the chosen approved hub.
-      if (storage.on) {
-        try {
-          const u = STORAGE_UNITS.find((x) => x.id === storage.unit)
-          await createStorageBooking({
-            customer_id: user.id,
-            customer_name: profile?.full_name || user.email,
-            customer_phone: profile?.phone || null,
-            warehouse_id: selectedWarehouse?.id || null,
-            warehouse_owner_id: selectedWarehouse?.owner_id || null,
-            unit_size: u.name,
-            warehouse: selectedWarehouse ? `${selectedWarehouse.name} (${selectedWarehouse.city})` : WAREHOUSES[0],
-            duration_label: storageDur.label,
-            days: storageDur.days,
-            start_date: new Date().toISOString().slice(0, 10),
-            price: storageTotal,
-            payment_method: payMethod,
-            items_summary: items.map((i) => i.name).join(', '),
-            items_count: items.length || 1,
-            status: 'reserved',
-            tracking_stage: 'reserved',
-          })
-        } catch {
-          // ignore — move booking already placed
-        }
+      const orderRef = generateOrderRef('MOVE')
+      const origin = window.location.origin
+      // Keep redirectUrl free of '?' because Safepay v3 /embedded appends ?order_id=...&tracker=...
+      const redirectUrl = `${origin}/payment/callback`
+      const cancelUrl = `${origin}/payment/callback?order_ref=${encodeURIComponent(orderRef)}&cancelled=1`
+
+      const session = await createSafepayCheckoutSession({
+        amountPkr: paymentSplit.advanceAmount,
+        orderId: orderRef,
+        redirectUrl,
+        cancelUrl,
+      })
+
+      const movePayload = {
+        customer_id: user.id,
+        status: 'pending',
+        pickup_address: pickup.trim(),
+        dropoff_address: dropoff.trim(),
+        pickup_lat: routeInfo?.pickupLat ?? null,
+        pickup_lng: routeInfo?.pickupLng ?? null,
+        dropoff_lat: routeInfo?.dropoffLat ?? (storage.on ? selectedWarehouse?.lat ?? null : null),
+        dropoff_lng: routeInfo?.dropoffLng ?? (storage.on ? selectedWarehouse?.lng ?? null : null),
+        warehouse_id: storage.on && selectedWarehouse ? selectedWarehouse.id : null,
+        vehicle: vehicleObj.name,
+        schedule_label: scheduleLabel,
+        distance_km: distanceKm ? Math.round(distanceKm * 10) / 10 : null,
+        price: total,
+        payment_method: 'card',
+        customer_name: profile?.full_name || null,
+        customer_phone: profile?.phone || null,
+        notes:
+          storage.on && selectedWarehouse
+            ? `Warehouse Shifting → ${selectedWarehouse.name} (${selectedWarehouse.address}). Complete shifting & handover to warehouse.`
+            : '',
       }
-      nav('/customer/track', { state: { bookingId: booking.id } })
+
+      const storagePayload = storage.on
+        ? (() => {
+            const u = STORAGE_UNITS.find((x) => x.id === storage.unit)
+            return {
+              customer_id: user.id,
+              customer_name: profile?.full_name || user.email,
+              customer_phone: profile?.phone || null,
+              warehouse_id: selectedWarehouse?.id || null,
+              warehouse_owner_id: selectedWarehouse?.owner_id || null,
+              unit_size: u.name,
+              warehouse: selectedWarehouse ? `${selectedWarehouse.name} (${selectedWarehouse.city})` : WAREHOUSES[0],
+              duration_label: storageDur.label,
+              days: storageDur.days,
+              start_date: new Date().toISOString().slice(0, 10),
+              price: storageTotal,
+              payment_method: 'card',
+              items_summary: items.map((i) => i.name).join(', '),
+              items_count: items.length || 1,
+              status: 'reserved',
+              tracking_stage: 'reserved',
+            }
+          })()
+        : null
+
+      savePendingCheckout({
+        orderRef,
+        kind: 'move',
+        tracker: session.tracker,
+        checkoutUrl: session.checkoutUrl,
+        totalAmount: paymentSplit.total,
+        advanceAmount: paymentSplit.advanceAmount,
+        remainingAmount: paymentSplit.remainingAmount,
+        balanceMethod: payMethod,
+        movePayload,
+        items,
+        storagePayload,
+        returnPath: '/customer/book',
+      })
+
+      window.location.assign(session.checkoutUrl)
     } catch (e2) {
-      setErr(e2.message || 'Could not place booking.')
-    } finally {
+      setErr(e2.message || 'Could not initialize Safepay 30% advance checkout.')
       setBusy(false)
     }
   }
@@ -188,8 +228,8 @@ export function BookWizard() {
     exit: (d) => ({ x: d > 0 ? -60 : 60, opacity: 0 }),
   }
 
-  const payLabel = payMethod === 'cod' ? `Place Order · ${money(total)}` : `Pay ${money(total)}`
-  const nextLabel = ['Next Step', 'Continue', 'Review Summary', 'Confirm & Pay', payLabel][step]
+  const payLabel = `Pay ${ADVANCE_PERCENT}% Advance · ${money(paymentSplit.advanceAmount)}`
+  const nextLabel = ['Next Step', 'Continue', 'Review Summary', 'Proceed to Safepay', payLabel][step]
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -222,6 +262,11 @@ export function BookWizard() {
                 setScheduleLabel={setScheduleLabel}
                 routeInfo={routeInfo}
                 setRouteInfo={setRouteInfo}
+                storage={storage}
+                setStorage={setStorage}
+                storageTotal={storageTotal}
+                warehouses={warehouses}
+                selectedWarehouse={selectedWarehouse}
               />
             )}
             {step === 1 && (
@@ -238,10 +283,14 @@ export function BookWizard() {
                 setStorage={setStorage}
                 storageTotal={storageTotal}
                 warehouses={warehouses}
+                selectedWarehouse={selectedWarehouse}
+                onSelectWarehouseDropoff={(w) => {
+                  if (w) setDropoff(`${w.name} — ${w.address}`)
+                }}
               />
             )}
             {step === 2 && <StepItems items={items} setItems={setItems} />}
-            {step === 3 && <StepSummary vehicle={vehicle} items={items} pickup={pickup} dropoff={dropoff} scheduleLabel={scheduleLabel} total={total} distanceKm={distanceKm} distanceTotal={distanceTotal} storage={storage} storageDur={storageDur} storageTotal={storageTotal} />}
+            {step === 3 && <StepSummary vehicle={vehicle} items={items} pickup={pickup} dropoff={dropoff} scheduleLabel={scheduleLabel} total={total} distanceKm={distanceKm} distanceTotal={distanceTotal} storage={storage} storageDur={storageDur} storageTotal={storageTotal} selectedWarehouse={selectedWarehouse} />}
             {step === 4 && <StepPayment vehiclePrice={vehiclePrice} distanceKm={distanceKm} distanceTotal={distanceTotal} addOnsTotal={addOnsTotal} total={total} pickup={pickup} dropoff={dropoff} payMethod={payMethod} setPayMethod={setPayMethod} />}
           </motion.div>
         </AnimatePresence>
@@ -266,25 +315,230 @@ export function BookWizard() {
   )
 }
 
-/* ---------- Step 1: Locations ---------- */
-function StepLocations({ pickup, setPickup, dropoff, setDropoff, scheduleLabel, setScheduleLabel, routeInfo, setRouteInfo }) {
+/* ---------- Step 1: Locations (+ Optional Warehouse Purchase) ---------- */
+function StepLocations({
+  pickup,
+  setPickup,
+  dropoff,
+  setDropoff,
+  scheduleLabel,
+  setScheduleLabel,
+  routeInfo,
+  setRouteInfo,
+  storage,
+  setStorage,
+  storageTotal,
+  warehouses = [],
+  selectedWarehouse,
+}) {
   const options = ['Now', 'In 2 Hours', 'Evening', 'Tomorrow']
+  const [locating, setLocating] = useState(false)
+
+  async function useCurrentGps() {
+    setLocating(true)
+    try {
+      const loc = await getCurrentUserLocation()
+      setPickup(loc.address)
+    } catch {
+      // ignore if permission denied
+    } finally {
+      setLocating(false)
+    }
+  }
+
+  function enableWarehouseMode() {
+    const wh = selectedWarehouse || warehouses[0] || null
+    setStorage((s) => ({
+      ...s,
+      on: true,
+      warehouseId: s.warehouseId || wh?.id || '',
+    }))
+    if (wh) {
+      setDropoff(`${wh.name} — ${wh.address}`)
+    }
+  }
+
+  function enableStandardMode() {
+    setStorage((s) => ({ ...s, on: false }))
+    if (selectedWarehouse && dropoff.startsWith(selectedWarehouse.name)) {
+      setDropoff('')
+    }
+  }
+
   return (
     <>
       <h2 className="text-xl font-extrabold text-ink">Where are we moving?</h2>
+
+      {/* Destination Type Selector: Standard Address vs Purchase Warehouse Storage */}
+      <div className="grid grid-cols-2 gap-2.5">
+        <button
+          type="button"
+          onClick={enableStandardMode}
+          className={`rounded-2xl border-2 p-3 text-left transition ${
+            !storage.on
+              ? 'border-brand-600 bg-brand-50/70 shadow-[var(--shadow-card)]'
+              : 'border-slate-200 bg-white'
+          }`}
+        >
+          <MapPin className={`h-5 w-5 ${!storage.on ? 'text-brand-600' : 'text-slate-400'}`} />
+          <p className="mt-1.5 text-xs font-extrabold text-ink">Standard Drop-off</p>
+          <p className="text-[10px] text-slate-500">Home or office address</p>
+        </button>
+
+        <button
+          type="button"
+          onClick={enableWarehouseMode}
+          className={`rounded-2xl border-2 p-3 text-left transition ${
+            storage.on
+              ? 'border-purple-600 bg-purple-50/80 shadow-[var(--shadow-card)]'
+              : 'border-slate-200 bg-white'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <Warehouse className={`h-5 w-5 ${storage.on ? 'text-purple-600' : 'text-slate-400'}`} />
+            <span className="rounded-full bg-purple-100 px-1.5 py-0.5 text-[9px] font-extrabold text-purple-700">
+              PURCHASE
+            </span>
+          </div>
+          <p className="mt-1.5 text-xs font-extrabold text-ink">Shift to Warehouse</p>
+          <p className="text-[10px] text-slate-500">Buy storage unit + driver</p>
+        </button>
+      </div>
+
       <Card className="space-y-3 p-4">
         <div>
-          <span className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-slate-500">
-            <MapPin className="h-3.5 w-3.5 text-brand-500" /> Pickup Address
-          </span>
+          <div className="mb-1.5 flex items-center justify-between">
+            <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
+              <MapPin className="h-3.5 w-3.5 text-brand-500" /> Pickup Address
+            </span>
+            <button
+              type="button"
+              onClick={useCurrentGps}
+              disabled={locating}
+              className="inline-flex items-center gap-1 rounded-lg bg-brand-50 px-2 py-1 text-[11px] font-bold text-brand-700"
+            >
+              {locating ? <Loader2 className="h-3 w-3 animate-spin" /> : <LocateFixed className="h-3 w-3" />}
+              {locating ? 'Locating...' : 'Current Location'}
+            </button>
+          </div>
           <PlacesField value={pickup} onChange={setPickup} placeholder="Enter pickup address" />
         </div>
-        <div>
-          <span className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-slate-500">
-            <Diamond className="h-3.5 w-3.5 text-rose-500" /> Drop-off Address
-          </span>
-          <PlacesField value={dropoff} onChange={setDropoff} placeholder="Enter destination address" />
-        </div>
+
+        {!storage.on ? (
+          <div>
+            <span className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-slate-500">
+              <Diamond className="h-3.5 w-3.5 text-rose-500" /> Drop-off Address
+            </span>
+            <PlacesField value={dropoff} onChange={setDropoff} placeholder="Enter destination address" />
+          </div>
+        ) : (
+          <div className="space-y-3 border-t border-slate-100 pt-3">
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-1.5 text-xs font-extrabold text-purple-700">
+                <Warehouse className="h-3.5 w-3.5" /> Select Verified Warehouse to Purchase
+              </span>
+              <Badge tone="green">{warehouses.length} Approved</Badge>
+            </div>
+
+            {warehouses.length === 0 ? (
+              <p className="rounded-xl bg-slate-50 p-3 text-xs text-slate-500">
+                Loading approved warehouses...
+              </p>
+            ) : (
+              <div className="space-y-2 max-h-56 overflow-y-auto pr-0.5">
+                {warehouses.map((w) => {
+                  const active = (selectedWarehouse?.id || storage.warehouseId) === w.id
+                  const freeUnits =
+                    Number(w.small_units_available || 0) +
+                    Number(w.medium_units_available || 0) +
+                    Number(w.large_units_available || 0)
+                  return (
+                    <button
+                      key={w.id}
+                      type="button"
+                      onClick={() => {
+                        setStorage((s) => ({ ...s, on: true, warehouseId: w.id }))
+                        setDropoff(`${w.name} — ${w.address}`)
+                      }}
+                      className={`w-full rounded-xl border-2 p-3 text-left transition ${
+                        active ? 'border-purple-600 bg-purple-50/70' : 'border-slate-100 bg-white'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-xs font-extrabold text-ink flex items-center gap-1">
+                            {w.name}
+                            <ShieldCheck className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                          </p>
+                          <p className="truncate text-[10px] text-slate-500">{w.address}</p>
+                        </div>
+                        <span className="shrink-0 text-right">
+                          <span className="block text-xs font-extrabold text-purple-700">
+                            {money(unitRateForWarehouse(storage.unit, w))}/d
+                          </span>
+                          <span className="block text-[9px] text-slate-400">{freeUnits} free</span>
+                        </span>
+                      </div>
+                      <div className="mt-1.5 flex flex-wrap gap-1 text-[9px] font-bold">
+                        <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-600">{w.city}</span>
+                        {w.climate_controlled && (
+                          <span className="inline-flex items-center gap-0.5 rounded bg-brand-50 px-1.5 py-0.5 text-brand-700">
+                            <Thermometer className="h-2.5 w-2.5" /> {w.temperature_c ?? 21}°C
+                          </span>
+                        )}
+                        {w.cctv_enabled && (
+                          <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-700">24/7 CCTV</span>
+                        )}
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+
+            {/* Quick Unit Size & Duration Purchase Config right inside Step 1 */}
+            <div className="grid grid-cols-3 gap-1.5">
+              {STORAGE_UNITS.map((u) => {
+                const rate = unitRateForWarehouse(u.id, selectedWarehouse)
+                return (
+                  <button
+                    key={u.id}
+                    type="button"
+                    onClick={() => setStorage((s) => ({ ...s, unit: u.id }))}
+                    className={`rounded-xl border p-2 text-center transition ${
+                      storage.unit === u.id ? 'border-purple-600 bg-purple-50' : 'border-slate-200 bg-white'
+                    }`}
+                  >
+                    <span className="block text-[11px] font-bold text-ink">{u.name.replace(' Unit', '')}</span>
+                    <span className="block text-[9px] text-purple-700 font-bold">{money(rate)}/d</span>
+                  </button>
+                )
+              })}
+            </div>
+
+            <div className="flex flex-wrap gap-1.5">
+              {STORAGE_DURATIONS.map((d) => (
+                <button
+                  key={d.id}
+                  type="button"
+                  onClick={() => setStorage((s) => ({ ...s, duration: d.id }))}
+                  className={`rounded-full border px-2.5 py-1 text-[11px] font-bold transition ${
+                    storage.duration === d.id
+                      ? 'border-purple-600 bg-purple-600 text-white'
+                      : 'border-slate-200 text-slate-600'
+                  }`}
+                >
+                  {d.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-between rounded-xl bg-purple-600 px-3 py-2 text-xs font-extrabold text-white">
+              <span>Warehouse Storage Plan</span>
+              <span>+ {money(storageTotal)}</span>
+            </div>
+          </div>
+        )}
       </Card>
 
       <div>
@@ -319,7 +573,7 @@ function StepLocations({ pickup, setPickup, dropoff, setDropoff, scheduleLabel, 
 }
 
 /* ---------- Step 2: Vehicle & Services ---------- */
-function StepVehicle({ vehicle, setVehicle, extras, toggleExtra, vehiclePrice, distanceKm, distanceTotal, extrasTotal, storage, setStorage, storageTotal, warehouses = [] }) {
+function StepVehicle({ vehicle, setVehicle, extras, toggleExtra, vehiclePrice, distanceKm, distanceTotal, extrasTotal, storage, setStorage, storageTotal, warehouses = [], selectedWarehouse, onSelectWarehouseDropoff }) {
   return (
     <>
       <div>
@@ -370,18 +624,36 @@ function StepVehicle({ vehicle, setVehicle, extras, toggleExtra, vehiclePrice, d
         })}
       </Card>
 
-      {/* warehouse storage add-on */}
-      <h3 className="pt-1 text-base font-bold text-ink">Warehouse Storage</h3>
-      <Card className="p-4">
-        <button onClick={() => setStorage((s) => ({ ...s, on: !s.on }))} className="flex w-full items-center gap-3 text-left">
-          <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${storage.on ? 'bg-brand-600 text-white' : 'bg-brand-50 text-brand-500'}`}>
+      {/* warehouse storage purchase add-on */}
+      <div className="flex items-center justify-between pt-1">
+        <h3 className="text-base font-bold text-ink">Purchase Warehouse Storage</h3>
+        <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-extrabold uppercase text-purple-700">
+          Optional Add-on
+        </span>
+      </div>
+      <Card className={`p-4 transition ${storage.on ? 'ring-2 ring-purple-500 bg-purple-50/20' : ''}`}>
+        <button
+          type="button"
+          onClick={() => {
+            const nextOn = !storage.on
+            const wh = selectedWarehouse || warehouses[0] || null
+            setStorage((s) => ({ ...s, on: nextOn, warehouseId: s.warehouseId || wh?.id || '' }))
+            if (nextOn && wh && onSelectWarehouseDropoff) onSelectWarehouseDropoff(wh)
+          }}
+          className="flex w-full items-center gap-3 text-left"
+        >
+          <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${storage.on ? 'bg-purple-600 text-white' : 'bg-purple-50 text-purple-600'}`}>
             <Warehouse className="h-5 w-5" />
           </span>
           <span className="flex-1">
-            <span className="block text-sm font-semibold text-ink">Add secure storage</span>
-            <span className="block text-[11px] text-slate-400">Store items in a warehouse before/after the move</span>
+            <span className="block text-sm font-bold text-ink">
+              {storage.on ? 'Warehouse Storage Included' : 'Add & Purchase Warehouse Storage'}
+            </span>
+            <span className="block text-[11px] text-slate-500">
+              Reserve an admin-verified storage bay with 24/7 CCTV &amp; QR tracking
+            </span>
           </span>
-          <span className={`relative h-6 w-11 rounded-full transition ${storage.on ? 'bg-brand-600' : 'bg-slate-200'}`}>
+          <span className={`relative h-6 w-11 shrink-0 rounded-full transition ${storage.on ? 'bg-purple-600' : 'bg-slate-200'}`}>
             <span className={`absolute top-1 h-4 w-4 rounded-full bg-white transition-all ${storage.on ? 'left-6' : 'left-1'}`} />
           </span>
         </button>
@@ -396,9 +668,14 @@ function StepVehicle({ vehicle, setVehicle, extras, toggleExtra, vehiclePrice, d
                     <button
                       key={w.id}
                       type="button"
-                      onClick={() => setStorage((s) => ({ ...s, warehouseId: w.id }))}
+                      onClick={() => {
+                        setStorage((s) => ({ ...s, warehouseId: w.id }))
+                        if (onSelectWarehouseDropoff) onSelectWarehouseDropoff(w)
+                      }}
                       className={`rounded-xl border px-3 py-1.5 text-xs font-semibold transition ${
-                        storage.warehouseId === w.id ? 'border-brand-600 bg-brand-50 text-brand-700' : 'border-slate-200 text-slate-600'
+                        (selectedWarehouse?.id || storage.warehouseId) === w.id
+                          ? 'border-purple-600 bg-purple-50 text-purple-700'
+                          : 'border-slate-200 text-slate-600'
                       }`}
                     >
                       {w.name} ({w.city})
@@ -410,19 +687,23 @@ function StepVehicle({ vehicle, setVehicle, extras, toggleExtra, vehiclePrice, d
             <div>
               <p className="mb-1.5 text-xs font-semibold text-slate-500">Unit Size</p>
               <div className="grid grid-cols-3 gap-2">
-                {STORAGE_UNITS.map((u) => (
-                  <button
-                    key={u.id}
-                    onClick={() => setStorage((s) => ({ ...s, unit: u.id }))}
-                    className={`rounded-xl border p-2 text-center transition ${
-                      storage.unit === u.id ? 'border-brand-600 bg-brand-50' : 'border-slate-200'
-                    }`}
-                  >
-                    <Boxes className={`mx-auto h-4 w-4 ${storage.unit === u.id ? 'text-brand-600' : 'text-slate-400'}`} />
-                    <span className="mt-1 block text-[11px] font-bold text-ink">{u.name.replace(' Unit', '')}</span>
-                    <span className="block text-[9px] text-slate-400">{money(u.rate)}/d</span>
-                  </button>
-                ))}
+                {STORAGE_UNITS.map((u) => {
+                  const rate = unitRateForWarehouse(u.id, selectedWarehouse)
+                  return (
+                    <button
+                      key={u.id}
+                      type="button"
+                      onClick={() => setStorage((s) => ({ ...s, unit: u.id }))}
+                      className={`rounded-xl border p-2 text-center transition ${
+                        storage.unit === u.id ? 'border-purple-600 bg-purple-50' : 'border-slate-200 bg-white'
+                      }`}
+                    >
+                      <Boxes className={`mx-auto h-4 w-4 ${storage.unit === u.id ? 'text-purple-600' : 'text-slate-400'}`} />
+                      <span className="mt-1 block text-[11px] font-bold text-ink">{u.name.replace(' Unit', '')}</span>
+                      <span className="block text-[9px] text-slate-500">{money(rate)}/d</span>
+                    </button>
+                  )
+                })}
               </div>
             </div>
             <div>
@@ -431,9 +712,10 @@ function StepVehicle({ vehicle, setVehicle, extras, toggleExtra, vehiclePrice, d
                 {STORAGE_DURATIONS.map((d) => (
                   <button
                     key={d.id}
+                    type="button"
                     onClick={() => setStorage((s) => ({ ...s, duration: d.id }))}
                     className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
-                      storage.duration === d.id ? 'border-brand-600 bg-brand-50 text-brand-700' : 'border-slate-200 text-slate-600'
+                      storage.duration === d.id ? 'border-purple-600 bg-purple-50 text-purple-700' : 'border-slate-200 text-slate-600'
                     }`}
                   >
                     {d.label}
@@ -441,8 +723,8 @@ function StepVehicle({ vehicle, setVehicle, extras, toggleExtra, vehiclePrice, d
                 ))}
               </div>
             </div>
-            <div className="flex justify-between rounded-xl bg-brand-50 px-3 py-2 text-sm font-bold text-brand-700">
-              <span>Storage subtotal</span>
+            <div className="flex justify-between rounded-xl bg-purple-50 px-3 py-2 text-sm font-bold text-purple-700">
+              <span>Warehouse storage subtotal</span>
               <span>{money(storageTotal)}</span>
             </div>
           </div>
@@ -700,8 +982,9 @@ function StepItems({ items, setItems }) {
 }
 
 /* ---------- Step 4: Summary ---------- */
-function StepSummary({ vehicle, items, pickup, dropoff, scheduleLabel, total, distanceKm, distanceTotal, storage, storageDur, storageTotal }) {
+function StepSummary({ vehicle, items, pickup, dropoff, scheduleLabel, total, distanceKm, distanceTotal, storage, storageDur, storageTotal, selectedWarehouse }) {
   const v = vehicles.find((x) => x.id === vehicle)
+  const unitObj = STORAGE_UNITS.find((u) => u.id === storage.unit)
   const servicesOnly = total - v.price - distanceTotal - (storage.on ? storageTotal : 0)
   return (
     <>
@@ -740,8 +1023,10 @@ function StepSummary({ vehicle, items, pickup, dropoff, scheduleLabel, total, di
           <span>{money(servicesOnly)}</span>
         </div>
         {storage.on && (
-          <div className="mt-1 flex justify-between text-sm text-slate-600">
-            <span>Warehouse Storage ({storageDur.label})</span>
+          <div className="mt-1 flex justify-between text-sm text-purple-700 font-semibold">
+            <span>
+              Warehouse ({selectedWarehouse?.name || 'Storage'} · {unitObj?.name || 'Unit'} · {storageDur.label})
+            </span>
             <span>{money(storageTotal)}</span>
           </div>
         )}
@@ -749,6 +1034,21 @@ function StepSummary({ vehicle, items, pickup, dropoff, scheduleLabel, total, di
           <span className="text-ink">Total Amount</span>
           <span className="text-brand-700">{money(total)}</span>
         </div>
+        {(() => {
+          const split = computePaymentSplit(total)
+          return (
+            <div className="mt-3 rounded-xl bg-emerald-50/90 p-3 ring-1 ring-emerald-200/80 space-y-1">
+              <div className="flex justify-between text-xs font-extrabold text-emerald-800">
+                <span>{ADVANCE_PERCENT}% Advance via Safepay (Required Now)</span>
+                <span>{money(split.advanceAmount)}</span>
+              </div>
+              <div className="flex justify-between text-[11px] font-semibold text-slate-600">
+                <span>Remaining 70% Balance on Delivery</span>
+                <span>{money(split.remainingAmount)}</span>
+              </div>
+            </div>
+          )
+        })()}
       </Card>
     </>
   )
@@ -765,94 +1065,87 @@ function Info2({ icon: Icon, label, value }) {
   )
 }
 
-/* ---------- Step 5: Payment / Checkout ---------- */
+/* ---------- Step 5: Payment / Checkout (Safepay 30% Advance) ---------- */
 function StepPayment({ vehiclePrice, distanceKm, distanceTotal, addOnsTotal, total, pickup, dropoff, payMethod, setPayMethod }) {
-  const [save, setSave] = useState(false)
   const cod = payMethod === 'cod'
+  const split = computePaymentSplit(total)
+
   return (
     <>
       <div>
-        <h2 className="text-2xl font-extrabold text-ink">Complete Booking</h2>
+        <h2 className="text-2xl font-extrabold text-ink">Safepay 30% Advance</h2>
         <p className="text-sm text-slate-500">
-          {cod ? 'Pay the mover in cash when your items are delivered.' : 'Your move is scheduled. Enter your payment to confirm the shift.'}
+          Pay {ADVANCE_PERCENT}% ({money(split.advanceAmount)}) securely via Safepay to confirm your booking. Pay the remaining 70% ({money(split.remainingAmount)}) on delivery.
         </p>
       </div>
 
-      {/* payment method selector */}
-      <div className="grid grid-cols-2 gap-3">
-        <button
-          type="button"
-          onClick={() => setPayMethod('cod')}
-          className={`rounded-2xl border-2 p-4 text-left transition ${cod ? 'border-brand-600 bg-brand-50 shadow-[var(--shadow-card)]' : 'border-slate-100 bg-white'}`}
-        >
-          <Banknote className={`h-6 w-6 ${cod ? 'text-brand-600' : 'text-slate-400'}`} />
-          <p className="mt-2 text-sm font-bold text-ink">Cash on Delivery</p>
-          <p className="text-[11px] text-slate-400">Pay when delivered</p>
-        </button>
-        <button
-          type="button"
-          onClick={() => setPayMethod('card')}
-          className={`rounded-2xl border-2 p-4 text-left transition ${!cod ? 'border-brand-600 bg-brand-50 shadow-[var(--shadow-card)]' : 'border-slate-100 bg-white'}`}
-        >
-          <CreditCard className={`h-6 w-6 ${!cod ? 'text-brand-600' : 'text-slate-400'}`} />
-          <p className="mt-2 text-sm font-bold text-ink">Card</p>
-          <p className="text-[11px] text-slate-400">Pay now online</p>
-        </button>
+      {/* Mandatory Safepay 30% Advance Hero Card */}
+      <Card className="border-2 border-emerald-500 bg-gradient-to-br from-emerald-50 via-white to-brand-50/40 p-4 space-y-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-center gap-2.5">
+            <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-emerald-600 text-white shadow-md shadow-emerald-600/20">
+              <ShieldCheck className="h-6 w-6" />
+            </span>
+            <div>
+              <span className="inline-block rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-emerald-800">
+                Required to Confirm Booking
+              </span>
+              <p className="mt-0.5 text-base font-extrabold text-ink">Safepay Online Checkout</p>
+            </div>
+          </div>
+          <div className="text-right shrink-0">
+            <p className="text-[10px] font-bold uppercase text-emerald-700">Pay Now (30%)</p>
+            <p className="text-xl font-black text-emerald-700">{money(split.advanceAmount)}</p>
+          </div>
+        </div>
+
+        <p className="text-xs text-slate-600 leading-relaxed">
+          Tap the button below to open Safepay&apos;s encrypted hosted checkout. Your SmartShift move is officially placed and dispatched to verified drivers once Safepay confirms your 30% advance.
+        </p>
+
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-emerald-100 pt-2.5">
+          <div className="flex flex-wrap gap-1.5">
+            {['VISA', 'MASTERCARD', 'DEBIT', 'WALLET'].map((b) => (
+              <span key={b} className="rounded-md bg-white px-2 py-0.5 text-[9px] font-extrabold text-slate-600 ring-1 ring-slate-200">
+                {b}
+              </span>
+            ))}
+          </div>
+          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700">
+            <Lock className="h-3 w-3" /> Powered by Safepay
+          </span>
+        </div>
+      </Card>
+
+      {/* Remaining 70% Balance Payment Preference */}
+      <div className="space-y-2">
+        <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">
+          Remaining 70% Balance ({money(split.remainingAmount)}) Method
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            type="button"
+            onClick={() => setPayMethod('cod')}
+            className={`rounded-2xl border-2 p-3.5 text-left transition ${cod ? 'border-brand-600 bg-brand-50 shadow-[var(--shadow-card)]' : 'border-slate-100 bg-white'}`}
+          >
+            <Banknote className={`h-5 w-5 ${cod ? 'text-brand-600' : 'text-slate-400'}`} />
+            <p className="mt-1.5 text-xs font-bold text-ink">Cash on Delivery</p>
+            <p className="text-[10px] text-slate-400">Pay {money(split.remainingAmount)} on arrival</p>
+          </button>
+          <button
+            type="button"
+            onClick={() => setPayMethod('card')}
+            className={`rounded-2xl border-2 p-3.5 text-left transition ${!cod ? 'border-brand-600 bg-brand-50 shadow-[var(--shadow-card)]' : 'border-slate-100 bg-white'}`}
+          >
+            <CreditCard className={`h-5 w-5 ${!cod ? 'text-brand-600' : 'text-slate-400'}`} />
+            <p className="mt-1.5 text-xs font-bold text-ink">Card on Delivery</p>
+            <p className="text-[10px] text-slate-400">Settle {money(split.remainingAmount)} at drop-off</p>
+          </button>
+        </div>
       </div>
 
-      {cod ? (
-        <Card className="flex items-start gap-3 p-4">
-          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600">
-            <Banknote className="h-5 w-5" />
-          </span>
-          <div>
-            <p className="text-sm font-bold text-ink">Pay {money(total)} on delivery</p>
-            <p className="mt-0.5 text-[11px] text-slate-500">
-              Hand the cash to your mover after your items arrive and you confirm delivery. No advance payment needed.
-            </p>
-          </div>
-        </Card>
-      ) : (
-        <>
-          <Card className="space-y-3 p-4">
-            <div className="flex items-center justify-between">
-              <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-400">
-                <CreditCard className="h-4 w-4" /> Credit or Debit Card
-              </span>
-              <span className="flex gap-1">
-                <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold text-slate-500">VISA</span>
-                <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold text-slate-500">MC</span>
-              </span>
-            </div>
-            <Field label="Cardholder Name" placeholder="John Doe" />
-            <Field label="Card Number" trailing={<Lock className="h-4 w-4" />} placeholder="0000 0000 0000 0000" />
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Expiry Date" placeholder="MM/YY" />
-              <Field label="CVV" placeholder="•••" />
-            </div>
-            <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
-              <button
-                type="button"
-                onClick={() => setSave(!save)}
-                className={`grid h-5 w-5 place-items-center rounded-md border-2 transition ${save ? 'border-brand-600 bg-brand-600' : 'border-slate-300'}`}
-              >
-                {save && <Check className="h-3 w-3 text-white" />}
-              </button>
-              Save card details for future moves
-            </label>
-          </Card>
-
-          <div className="flex items-center justify-between px-1">
-            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600">
-              <ShieldCheck className="h-3.5 w-3.5" /> Secure SSL Encryption
-            </span>
-            <span className="text-[11px] text-slate-400">Powered by <span className="font-bold text-indigo-500">stripe</span></span>
-          </div>
-        </>
-      )}
-
       <Card className="p-4">
-        <p className="mb-3 text-base font-bold text-ink">Move Summary</p>
+        <p className="mb-3 text-base font-bold text-ink">Payment Breakdown</p>
         <div className="flex justify-between text-sm text-slate-600">
           <span>Base Logistics Fee</span>
           <span className="font-semibold text-ink">{money(vehiclePrice)}</span>
@@ -865,9 +1158,17 @@ function StepPayment({ vehiclePrice, distanceKm, distanceTotal, addOnsTotal, tot
           <span>Add-ons & Services</span>
           <span className="font-semibold text-ink">{money(addOnsTotal)}</span>
         </div>
-        <div className="mt-3 flex justify-between border-t border-slate-100 pt-3 text-base font-extrabold">
-          <span className="text-ink">{cod ? 'Payable on Delivery' : 'Total Amount'}</span>
-          <span className="text-brand-700">{money(total)}</span>
+        <div className="mt-3 flex justify-between border-t border-slate-100 pt-3 text-sm font-bold text-slate-700">
+          <span>Total Move Value</span>
+          <span>{money(total)}</span>
+        </div>
+        <div className="mt-2 flex justify-between text-base font-extrabold text-emerald-700">
+          <span>30% Advance Due Now (Safepay)</span>
+          <span>{money(split.advanceAmount)}</span>
+        </div>
+        <div className="mt-1 flex justify-between text-xs font-semibold text-slate-500">
+          <span>70% Balance ({cod ? 'Cash on Delivery' : 'Card on Delivery'})</span>
+          <span>{money(split.remainingAmount)}</span>
         </div>
       </Card>
 
@@ -878,12 +1179,12 @@ function StepPayment({ vehiclePrice, distanceKm, distanceTotal, addOnsTotal, tot
         <MapPin className="h-3.5 w-3.5 text-brand-500" /> {pickup || 'Pickup'} → {dropoff || 'Drop-off'}
       </p>
 
-      {!cod && (
-        <div className="flex gap-2 rounded-xl bg-brand-50 p-3 text-[11px] text-brand-700">
-          <Info className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>A temporary authorization hold of {money(500)} will be applied to verify your card validity.</span>
-        </div>
-      )}
+      <div className="flex gap-2 rounded-xl bg-brand-50 p-3 text-[11px] text-brand-700">
+        <Info className="mt-0.5 h-4 w-4 shrink-0" />
+        <span>
+          Your card details are entered directly on Safepay&apos;s PCI-DSS certified checkout page — SmartShift never stores raw card numbers.
+        </span>
+      </div>
     </>
   )
 }
