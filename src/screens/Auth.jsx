@@ -27,6 +27,19 @@ import { setRole, getRole, homeFor } from '../lib/auth'
 import { supabase } from '../lib/supabase'
 import { uploadFile, upsertProfile, getProfile } from '../lib/db'
 import { createWarehouse, CITY_COORDS } from '../lib/warehouse'
+import {
+  validateName,
+  validateEmail,
+  validatePhone,
+  validatePassword,
+  validateConfirm,
+  validatePlate,
+  validateFile,
+  validateCount,
+  validatePositive,
+  normalizePhone,
+  friendlyAuthError,
+} from '../lib/validation'
 
 /* ===================== Onboarding ===================== */
 const slides = [
@@ -167,6 +180,7 @@ export function Register() {
     email: '',
     phone: '',
     password: '',
+    confirmPassword: '',
     vehicleType: 'Mini Truck',
     vehiclePlate: '',
     warehouseName: '',
@@ -189,61 +203,116 @@ export function Register() {
   const [warehousePhoto, setWarehousePhoto] = useState(null)
   const [docs, setDocs] = useState({})
   const [err, setErr] = useState('')
+  const [fieldErrs, setFieldErrs] = useState({})
   const [busy, setBusy] = useState(false)
 
   const isMover = role === 'mover'
   const isWarehouse = role === 'warehouse'
-  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
+  const clearErr = (k) => setFieldErrs((fe) => (fe[k] ? { ...fe, [k]: '' } : fe))
+  const set = (k) => (e) => {
+    const value = e.target.value
+    setForm((f) => ({ ...f, [k]: value }))
+    clearErr(k)
+  }
   const pickRole = (r) => {
     setRoleState(r)
     setRole(r)
     setErr('')
+    setFieldErrs({})
+  }
+
+  // Returns { field: message } for every invalid field.
+  function validate() {
+    const fe = {}
+    const put = (k, msg) => {
+      if (msg) fe[k] = msg
+    }
+    put('fullName', validateName(form.fullName))
+    put('phone', validatePhone(form.phone))
+    put('email', validateEmail(form.email))
+    put('password', validatePassword(form.password))
+    put('confirmPassword', validateConfirm(form.password, form.confirmPassword))
+
+    if (isMover || isWarehouse) {
+      put('avatar', validateFile(avatar, isWarehouse ? 'Owner profile photo' : 'Profile photo', 'image/*'))
+    } else if (avatar) {
+      put('avatar', validateFile(avatar, 'Profile photo', 'image/*'))
+    }
+
+    if (isMover) {
+      put('vehiclePlate', validatePlate(form.vehiclePlate))
+      for (const d of moverDocs) put(`doc_${d.key}`, validateFile(docs[d.key], d.label, d.accept || 'image/*'))
+    }
+
+    if (isWarehouse) {
+      const wName = form.warehouseName.trim()
+      if (!wName) put('warehouseName', 'Warehouse name is required.')
+      else if (wName.length < 3) put('warehouseName', 'Warehouse name must be at least 3 characters.')
+      else if (wName.length > 80) put('warehouseName', 'Warehouse name must be 80 characters or fewer.')
+
+      const addr = form.warehouseAddress.trim()
+      if (!addr) put('warehouseAddress', 'Warehouse address is required.')
+      else if (addr.length < 10) put('warehouseAddress', 'Enter the full facility address (street, area, city).')
+
+      put('capacitySqm', validatePositive(form.capacitySqm, 'Total area', 1_000_000))
+      put('smallUnits', validateCount(form.smallUnits, 'Small units'))
+      put('mediumUnits', validateCount(form.mediumUnits, 'Medium units'))
+      put('largeUnits', validateCount(form.largeUnits, 'Large units'))
+      if (!fe.smallUnits && !fe.mediumUnits && !fe.largeUnits) {
+        const total = Number(form.smallUnits) + Number(form.mediumUnits) + Number(form.largeUnits)
+        if (total <= 0) put('smallUnits', 'Add at least one storage unit.')
+      }
+      put('smallRate', validatePositive(form.smallRate, 'Small rate', 1_000_000))
+      put('mediumRate', validatePositive(form.mediumRate, 'Medium rate', 1_000_000))
+      put('largeRate', validatePositive(form.largeRate, 'Large rate', 1_000_000))
+
+      if (warehousePhoto) put('warehousePhoto', validateFile(warehousePhoto, 'Warehouse photo', 'image/*'))
+      for (const d of warehouseDocs) put(`doc_${d.key}`, validateFile(docs[d.key], d.label, d.accept || 'image/*'))
+    }
+    return fe
   }
 
   async function submit(e) {
     e.preventDefault()
     setErr('')
 
-    // ---- validation ----
-    if (!form.fullName.trim()) return setErr('Full name is required.')
-    if (!form.email.trim()) return setErr('Email is required.')
-    if (form.password.length < 6) return setErr('Password must be at least 6 characters.')
-    if (isMover) {
-      if (!avatar) return setErr('Profile photo is required.')
-      for (const d of moverDocs) {
-        if (!docs[d.key]) return setErr(`${d.label} is required.`)
-      }
+    const fe = validate()
+    setFieldErrs(fe)
+    const first = Object.values(fe)[0]
+    if (first) {
+      const n = Object.keys(fe).length
+      return setErr(n > 1 ? `Please fix ${n} highlighted fields. ${first}` : first)
     }
-    if (isWarehouse) {
-      if (!avatar) return setErr('Owner profile photo is required.')
-      if (!form.warehouseName.trim()) return setErr('Warehouse name is required.')
-      if (!form.warehouseAddress.trim()) return setErr('Warehouse address is required.')
-      for (const d of warehouseDocs) {
-        if (!docs[d.key]) return setErr(`${d.label} is required for admin approval.`)
-      }
-    }
+
+    const email = form.email.trim().toLowerCase()
+    const phone = normalizePhone(form.phone)
 
     setBusy(true)
     try {
       const { data, error } = await supabase.auth.signUp({
-        email: form.email.trim(),
+        email,
         password: form.password,
       })
       if (error) throw error
       const user = data.user
       if (!user) throw new Error('Sign up failed. Please try again.')
+      // Supabase returns a user with no identities when the email is already registered.
+      if (Array.isArray(user.identities) && user.identities.length === 0) {
+        setFieldErrs({ email: 'This email is already registered.' })
+        throw new Error('An account with this email already exists. Please log in instead.')
+      }
 
       const profile = {
         id: user.id,
         role,
-        full_name: form.fullName.trim(),
-        email: form.email.trim(),
-        phone: form.phone.trim() || null,
+        full_name: form.fullName.trim().replace(/\s+/g, ' '),
+        email,
+        phone,
         verification_status: isMover || isWarehouse ? 'pending' : 'approved',
       }
       if (isMover) {
         profile.vehicle_type = form.vehicleType || 'Mini Truck'
-        profile.vehicle_plate = form.vehiclePlate.trim() || null
+        profile.vehicle_plate = form.vehiclePlate.trim().toUpperCase()
       }
       if (avatar) profile.avatar_url = await uploadFile('avatars', user.id, avatar, 'avatar')
       if (isMover) {
@@ -264,8 +333,8 @@ export function Register() {
           address: form.warehouseAddress.trim(),
           lat: Number(form.warehouseLat) || cityFallback.lat,
           lng: Number(form.warehouseLng) || cityFallback.lng,
-          contact_phone: form.phone.trim() || null,
-          contact_email: form.email.trim(),
+          contact_phone: phone,
+          contact_email: email,
           total_capacity_sqm: Number(form.capacitySqm) || 500,
           occupied_capacity_sqm: 0,
           small_units_total: Number(form.smallUnits) || 10,
@@ -297,7 +366,7 @@ export function Register() {
       setRole(role)
       nav(homeFor(role))
     } catch (e2) {
-      setErr(e2.message || 'Something went wrong.')
+      setErr(friendlyAuthError(e2))
     } finally {
       setBusy(false)
     }
@@ -365,29 +434,77 @@ export function Register() {
                     type="file"
                     accept="image/*"
                     className="hidden"
-                    onChange={(e) => setAvatar(e.target.files?.[0] ?? null)}
+                    onChange={(e) => {
+                      setAvatar(e.target.files?.[0] ?? null)
+                      clearErr('avatar')
+                    }}
                   />
                 </label>
                 <span className="mt-2 text-xs font-semibold text-slate-500">
                   {isWarehouse ? 'Owner Profile Picture' : 'Upload Profile Picture'}{' '}
                   {(isMover || isWarehouse) && <span className="text-rose-500">*</span>}
                 </span>
+                {fieldErrs.avatar && (
+                  <span className="mt-1 text-[11px] font-semibold text-rose-600">{fieldErrs.avatar}</span>
+                )}
               </div>
 
-              <Field label="Full Name" value={form.fullName} onChange={set('fullName')} placeholder="John Doe" />
-              <Field label="Phone Number" value={form.phone} onChange={set('phone')} placeholder="+92 300 0000000" />
-              <Field label="Email Address" type="email" value={form.email} onChange={set('email')} placeholder="john@example.com" />
               <Field
-                label="Password"
+                label="Full Name *"
+                value={form.fullName}
+                onChange={set('fullName')}
+                placeholder="John Doe"
+                autoComplete="name"
+                maxLength={50}
+                error={fieldErrs.fullName}
+              />
+              <Field
+                label="Phone Number *"
+                type="tel"
+                inputMode="tel"
+                value={form.phone}
+                onChange={(e) => {
+                  // allow digits, a leading +, spaces and dashes only
+                  const v = e.target.value.replace(/[^\d+\s-]/g, '').replace(/(?!^)\+/g, '')
+                  setForm((f) => ({ ...f, phone: v }))
+                  clearErr('phone')
+                }}
+                placeholder="+923001234567 or 03001234567"
+                autoComplete="tel"
+                maxLength={16}
+                error={fieldErrs.phone}
+              />
+              <Field
+                label="Email Address *"
+                type="email"
+                value={form.email}
+                onChange={set('email')}
+                placeholder="john@example.com"
+                autoComplete="email"
+                error={fieldErrs.email}
+              />
+              <Field
+                label="Password *"
                 type={show ? 'text' : 'password'}
                 value={form.password}
                 onChange={set('password')}
-                placeholder="••••••••"
+                placeholder="Min 8 chars, letters & numbers"
+                autoComplete="new-password"
+                error={fieldErrs.password}
                 trailing={
                   <button type="button" onClick={() => setShow(!show)}>
                     {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 }
+              />
+              <Field
+                label="Confirm Password *"
+                type={show ? 'text' : 'password'}
+                value={form.confirmPassword}
+                onChange={set('confirmPassword')}
+                placeholder="Re-enter password"
+                autoComplete="new-password"
+                error={fieldErrs.confirmPassword}
               />
 
               {isMover && (
@@ -405,7 +522,14 @@ export function Register() {
                         ))}
                       </select>
                     </div>
-                    <Field label="License Plate" value={form.vehiclePlate} onChange={set('vehiclePlate')} placeholder="LEA-8492" />
+                    <Field
+                      label="License Plate *"
+                      value={form.vehiclePlate}
+                      onChange={set('vehiclePlate')}
+                      placeholder="LEA-8492"
+                      maxLength={12}
+                      error={fieldErrs.vehiclePlate}
+                    />
                   </div>
                   <div className="space-y-3 rounded-xl bg-slate-50 p-3">
                     <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Driver Verification Documents</p>
@@ -416,7 +540,11 @@ export function Register() {
                         required
                         accept={d.accept || 'image/*'}
                         value={docs[d.key] || null}
-                        onChange={(f) => setDocs((p) => ({ ...p, [d.key]: f }))}
+                        error={fieldErrs[`doc_${d.key}`]}
+                        onChange={(f) => {
+                          setDocs((p) => ({ ...p, [d.key]: f }))
+                          clearErr(`doc_${d.key}`)
+                        }}
                       />
                     ))}
                   </div>
@@ -432,6 +560,8 @@ export function Register() {
                       value={form.warehouseName}
                       onChange={set('warehouseName')}
                       placeholder="e.g. SafeVault Gulberg Storage"
+                      maxLength={80}
+                      error={fieldErrs.warehouseName}
                     />
                     <div>
                       <span className="mb-1.5 block text-xs font-semibold text-slate-500">City</span>
@@ -453,23 +583,30 @@ export function Register() {
                       <span className="mb-1.5 block text-xs font-semibold text-slate-500">Full Facility Address *</span>
                       <PlacesField
                         value={form.warehouseAddress}
-                        onChange={(v) => setForm((f) => ({ ...f, warehouseAddress: v }))}
-                        onPlace={({ address, lat, lng }) =>
+                        onChange={(v) => {
+                          setForm((f) => ({ ...f, warehouseAddress: v }))
+                          clearErr('warehouseAddress')
+                        }}
+                        onPlace={({ address, lat, lng }) => {
                           setForm((f) => ({ ...f, warehouseAddress: address, warehouseLat: lat, warehouseLng: lng }))
-                        }
+                          clearErr('warehouseAddress')
+                        }}
                         placeholder="Enter street & sector address"
                       />
+                      {fieldErrs.warehouseAddress && (
+                        <span className="mt-1 block text-[11px] font-semibold text-rose-600">{fieldErrs.warehouseAddress}</span>
+                      )}
                     </div>
                     <div className="grid grid-cols-2 gap-2.5">
-                      <Field label="Total Area (m²)" type="number" value={form.capacitySqm} onChange={set('capacitySqm')} />
-                      <Field label="Small Units" type="number" value={form.smallUnits} onChange={set('smallUnits')} />
-                      <Field label="Medium Units" type="number" value={form.mediumUnits} onChange={set('mediumUnits')} />
-                      <Field label="Large Units" type="number" value={form.largeUnits} onChange={set('largeUnits')} />
+                      <Field label="Total Area (m²)" type="number" inputMode="numeric" min={1} value={form.capacitySqm} onChange={set('capacitySqm')} error={fieldErrs.capacitySqm} />
+                      <Field label="Small Units" type="number" inputMode="numeric" min={0} step={1} value={form.smallUnits} onChange={set('smallUnits')} error={fieldErrs.smallUnits} />
+                      <Field label="Medium Units" type="number" inputMode="numeric" min={0} step={1} value={form.mediumUnits} onChange={set('mediumUnits')} error={fieldErrs.mediumUnits} />
+                      <Field label="Large Units" type="number" inputMode="numeric" min={0} step={1} value={form.largeUnits} onChange={set('largeUnits')} error={fieldErrs.largeUnits} />
                     </div>
                     <div className="grid grid-cols-3 gap-2">
-                      <Field label="Small/d (PKR)" type="number" value={form.smallRate} onChange={set('smallRate')} />
-                      <Field label="Med/d (PKR)" type="number" value={form.mediumRate} onChange={set('mediumRate')} />
-                      <Field label="Large/d (PKR)" type="number" value={form.largeRate} onChange={set('largeRate')} />
+                      <Field label="Small/d (PKR)" type="number" inputMode="numeric" min={1} value={form.smallRate} onChange={set('smallRate')} error={fieldErrs.smallRate} />
+                      <Field label="Med/d (PKR)" type="number" inputMode="numeric" min={1} value={form.mediumRate} onChange={set('mediumRate')} error={fieldErrs.mediumRate} />
+                      <Field label="Large/d (PKR)" type="number" inputMode="numeric" min={1} value={form.largeRate} onChange={set('largeRate')} error={fieldErrs.largeRate} />
                     </div>
                     <div className="flex flex-wrap gap-2 pt-1">
                       {[
@@ -492,7 +629,11 @@ export function Register() {
                     <FileUpload
                       label="Warehouse Facility Photo (Optional)"
                       value={warehousePhoto}
-                      onChange={setWarehousePhoto}
+                      error={fieldErrs.warehousePhoto}
+                      onChange={(f) => {
+                        setWarehousePhoto(f)
+                        clearErr('warehousePhoto')
+                      }}
                       hint="Shown to customers browsing storage"
                     />
                   </div>
@@ -508,7 +649,11 @@ export function Register() {
                         required
                         accept={d.accept || 'image/*'}
                         value={docs[d.key] || null}
-                        onChange={(f) => setDocs((p) => ({ ...p, [d.key]: f }))}
+                        error={fieldErrs[`doc_${d.key}`]}
+                        onChange={(f) => {
+                          setDocs((p) => ({ ...p, [d.key]: f }))
+                          clearErr(`doc_${d.key}`)
+                        }}
                       />
                     ))}
                   </div>
@@ -625,6 +770,7 @@ export function Login() {
   const [password, setPassword] = useState('')
   const [keep, setKeep] = useState(false)
   const [err, setErr] = useState('')
+  const [loginErrs, setLoginErrs] = useState({})
   const [busy, setBusy] = useState(false)
   const [role, setRoleState] = useState(getRole() || 'customer')
 
@@ -636,11 +782,16 @@ export function Login() {
   async function submit(e) {
     e.preventDefault()
     setErr('')
-    if (!email.trim() || !password) return setErr('Enter your email and password.')
+    const fe = {
+      email: validateEmail(email),
+      password: password ? '' : 'Password is required.',
+    }
+    setLoginErrs(fe)
+    if (fe.email || fe.password) return setErr(fe.email || fe.password)
     setBusy(true)
     try {
       const { data, error } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
+        email: email.trim().toLowerCase(),
         password,
       })
       if (error) throw error
@@ -653,7 +804,7 @@ export function Login() {
       setRole(r)
       nav(homeFor(r))
     } catch (e2) {
-      setErr(e2.message || 'Login failed.')
+      setErr(friendlyAuthError(e2, 'Login failed.'))
     } finally {
       setBusy(false)
     }
@@ -672,7 +823,19 @@ export function Login() {
             <h1 className="text-2xl font-extrabold text-ink">Welcome Back</h1>
             <p className="mt-1 text-sm text-slate-500">Please enter your credentials to manage your moves.</p>
             <form onSubmit={submit} className="mt-5 space-y-4">
-              <Field label="Email Address" icon={Mail} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@company.com" />
+              <Field
+                label="Email Address"
+                icon={Mail}
+                type="email"
+                value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value)
+                  setLoginErrs((f) => ({ ...f, email: '' }))
+                }}
+                placeholder="name@company.com"
+                autoComplete="email"
+                error={loginErrs.email}
+              />
               <div>
                 <div className="mb-1.5 flex items-center justify-between">
                   <span className="text-xs font-semibold text-slate-500">Password</span>
@@ -682,8 +845,13 @@ export function Login() {
                   icon={Lock}
                   type={show ? 'text' : 'password'}
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => {
+                    setPassword(e.target.value)
+                    setLoginErrs((f) => ({ ...f, password: '' }))
+                  }}
                   placeholder="••••••••"
+                  autoComplete="current-password"
+                  error={loginErrs.password}
                   trailing={
                     <button type="button" onClick={() => setShow(!show)}>
                       {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -760,16 +928,17 @@ export function ForgotPassword() {
   async function submit(e) {
     e.preventDefault()
     setErr('')
-    if (!email.trim()) return setErr('Enter your email.')
+    const emailErr = validateEmail(email)
+    if (emailErr) return setErr(emailErr)
     setBusy(true)
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
         redirectTo: `${window.location.origin}/reset`,
       })
       if (error) throw error
       setSent(true)
     } catch (e2) {
-      setErr(e2.message || 'Could not send reset link.')
+      setErr(friendlyAuthError(e2, 'Could not send reset link.'))
     } finally {
       setBusy(false)
     }
@@ -853,8 +1022,8 @@ export function ResetPassword() {
   async function submit(e) {
     e.preventDefault()
     setErr('')
-    if (password.length < 6) return setErr('Password must be at least 6 characters.')
-    if (password !== confirm) return setErr('Passwords do not match.')
+    const pwErr = validatePassword(password) || validateConfirm(password, confirm)
+    if (pwErr) return setErr(pwErr)
     setBusy(true)
     try {
       const { error } = await supabase.auth.updateUser({ password })
@@ -862,7 +1031,7 @@ export function ResetPassword() {
       setDone(true)
       await supabase.auth.signOut()
     } catch (e2) {
-      setErr(e2.message || 'Could not reset password.')
+      setErr(friendlyAuthError(e2, 'Could not reset password.'))
     } finally {
       setBusy(false)
     }

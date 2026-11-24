@@ -51,26 +51,32 @@ export function Button({ children, variant = 'primary', className = '', ...rest 
 }
 
 /* ---------- Field ---------- */
-export function Field({ label, icon: Icon, trailing, ...rest }) {
+export function Field({ label, icon: Icon, trailing, error, ...rest }) {
   return (
     <label className="block">
       {label && <span className="mb-1.5 block text-xs font-semibold text-slate-500">{label}</span>}
       <div className="relative flex items-center">
         {Icon && <Icon className="pointer-events-none absolute left-3.5 h-4 w-4 text-slate-400" />}
         <input
-          className={`w-full rounded-xl border border-slate-200 bg-white py-3 text-base text-ink placeholder:text-slate-400 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100 sm:text-sm ${
+          aria-invalid={error ? true : undefined}
+          className={`w-full rounded-xl border bg-white py-3 text-base text-ink placeholder:text-slate-400 outline-none transition focus:ring-2 sm:text-sm ${
+            error
+              ? 'border-rose-400 focus:border-rose-500 focus:ring-rose-100'
+              : 'border-slate-200 focus:border-brand-400 focus:ring-brand-100'
+          } ${
             Icon ? 'pl-10' : 'pl-3.5'
           } ${trailing ? 'pr-10' : 'pr-3.5'}`}
           {...rest}
         />
         {trailing && <div className="absolute right-3 text-slate-400">{trailing}</div>}
       </div>
+      {error && <span className="mt-1 block text-[11px] font-semibold text-rose-600">{error}</span>}
     </label>
   )
 }
 
 /* ---------- File upload ---------- */
-export function FileUpload({ label, value, onChange, required = false, accept = 'image/*', hint }) {
+export function FileUpload({ label, value, onChange, required = false, accept = 'image/*', hint, error }) {
   const has = !!value
   return (
     <div>
@@ -81,7 +87,11 @@ export function FileUpload({ label, value, onChange, required = false, accept = 
       )}
       <label
         className={`flex cursor-pointer items-center gap-3 rounded-xl border-2 border-dashed p-3 transition ${
-          has ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200 bg-white hover:border-brand-300'
+          error
+            ? 'border-rose-300 bg-rose-50/40'
+            : has
+            ? 'border-emerald-300 bg-emerald-50'
+            : 'border-slate-200 bg-white hover:border-brand-300'
         }`}
       >
         <span
@@ -104,6 +114,7 @@ export function FileUpload({ label, value, onChange, required = false, accept = 
           onChange={(e) => onChange(e.target.files?.[0] ?? null)}
         />
       </label>
+      {error && <span className="mt-1 block text-[11px] font-semibold text-rose-600">{error}</span>}
     </div>
   )
 }

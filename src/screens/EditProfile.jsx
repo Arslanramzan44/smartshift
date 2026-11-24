@@ -6,6 +6,7 @@ import { TopBar } from '../components/nav'
 import { ErrorMsg } from './Auth'
 import { useAuth } from '../lib/AuthContext'
 import { uploadFile, upsertProfile } from '../lib/db'
+import { validateName, validatePhone, validatePlate, normalizePhone } from '../lib/validation'
 
 const moverDocs = [
   { key: 'driving_license_url', label: 'Driving License', prefix: 'license' },
@@ -43,19 +44,23 @@ export default function EditProfile() {
     e.preventDefault()
     setErr('')
     setSaved(false)
-    if (!form.full_name.trim()) return setErr('Full name is required.')
+    const vErr =
+      validateName(form.full_name) ||
+      validatePhone(form.phone) ||
+      (isMover ? validatePlate(form.vehicle_plate) : '')
+    if (vErr) return setErr(vErr)
     setBusy(true)
     try {
       const update = {
         ...profile,
         id: user.id,
-        full_name: form.full_name.trim(),
-        phone: form.phone.trim() || null,
+        full_name: form.full_name.trim().replace(/\s+/g, ' '),
+        phone: normalizePhone(form.phone),
       }
       if (avatar) update.avatar_url = await uploadFile('avatars', user.id, avatar, 'avatar')
       if (isMover) {
         update.vehicle_type = form.vehicle_type || 'Mini Truck'
-        update.vehicle_plate = form.vehicle_plate.trim() || null
+        update.vehicle_plate = form.vehicle_plate.trim().toUpperCase()
         let uploadedNewDoc = false
         for (const d of moverDocs) {
           if (docs[d.key]) {
@@ -101,7 +106,7 @@ export default function EditProfile() {
               <FileUpload label="Profile Photo" value={avatar} onChange={setAvatar} hint="JPG or PNG" />
               <Field label="Full Name" value={form.full_name} onChange={(e) => setForm((f) => ({ ...f, full_name: e.target.value }))} placeholder="John Doe" />
               <Field label="Email Address" value={profile?.email || ''} disabled placeholder="—" />
-              <Field label="Phone Number" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} placeholder="+92 300 0000000" />
+              <Field label="Phone Number" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} type="tel" inputMode="tel" maxLength={16} placeholder="+923001234567 or 03001234567" />
 
               {isMover && (
                 <>
